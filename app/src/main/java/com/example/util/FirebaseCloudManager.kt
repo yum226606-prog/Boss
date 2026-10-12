@@ -42,9 +42,9 @@ object FirebaseCloudManager {
     private const val KEY_CUSTOM_SUPABASE_KEY = "custom_supabase_anon_key"
 
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(3, TimeUnit.SECONDS)
-        .readTimeout(3, TimeUnit.SECONDS)
-        .writeTimeout(5, TimeUnit.SECONDS)
+        .connectTimeout(6, TimeUnit.SECONDS)
+        .readTimeout(6, TimeUnit.SECONDS)
+        .writeTimeout(8, TimeUnit.SECONDS)
         .build()
 
     private val bgScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -55,13 +55,13 @@ object FirebaseCloudManager {
         appContext = context.applicationContext
     }
 
-    private const val DEFAULT_SUPABASE_URL = "https://dkeabwbfpkbiskfvhpqe.supabase.co"
-    private const val DEFAULT_SUPABASE_KEY = "sb_publishable_c988H9j-4-N3s63LBMV4sA_R289-x34"
+    private const val DEFAULT_SUPABASE_URL = "https://njykxcvfckzwedginpvh.supabase.co"
+    private const val DEFAULT_SUPABASE_KEY = "sb_publishable_7aV54en4ydYJGJ--lgIufA_DOU8h4X-"
 
     fun getSupabaseUrl(context: Context? = appContext): String {
         val prefs = context?.getSharedPreferences(PREFS_SUPABASE, Context.MODE_PRIVATE)
         val custom = prefs?.getString(KEY_CUSTOM_SUPABASE_URL, null)?.trim().orEmpty()
-        if (custom.isNotBlank() && custom.startsWith("http") && !custom.contains("your-project-id")) {
+        if (custom.isNotBlank() && custom.startsWith("http") && !custom.contains("your-project-id") && !custom.contains("dkeabwbfpkbiskfvhpqe")) {
             return custom.trimEnd('/')
         }
         val envUrl = try {
@@ -71,6 +71,7 @@ object FirebaseCloudManager {
         }
         return if (envUrl.isNotBlank() &&
             !envUrl.contains("your-project-id") &&
+            !envUrl.contains("dkeabwbfpkbiskfvhpqe") &&
             !envUrl.equals("DUMMY_KEY", ignoreCase = true) &&
             envUrl.startsWith("http")
         ) {
@@ -83,7 +84,7 @@ object FirebaseCloudManager {
     fun getSupabaseAnonKey(context: Context? = appContext): String {
         val prefs = context?.getSharedPreferences(PREFS_SUPABASE, Context.MODE_PRIVATE)
         val custom = prefs?.getString(KEY_CUSTOM_SUPABASE_KEY, null)?.trim().orEmpty()
-        if (custom.isNotBlank() && !custom.contains("your_supabase_anon_key")) {
+        if (custom.isNotBlank() && !custom.contains("your_supabase_anon_key") && !custom.contains("c988H9j-4-N3s63LBMV4sA")) {
             return custom
         }
         val envKey = try {
@@ -93,6 +94,7 @@ object FirebaseCloudManager {
         }
         return if (envKey.isNotBlank() &&
             !envKey.contains("your_supabase_anon_key") &&
+            !envKey.contains("c988H9j-4-N3s63LBMV4sA") &&
             !envKey.equals("DUMMY_KEY", ignoreCase = true)
         ) {
             envKey
@@ -791,6 +793,7 @@ object FirebaseCloudManager {
 
                 // Also create an instant Master Admin notification
                 val notifJson = JSONObject().apply {
+                    put("id", java.util.UUID.randomUUID().toString())
                     put("type", "SUBSCRIPTION_AUTO_ACTIVATED")
                     put("title", "Auto-Activated: ${record.planLabel} (Rs. ${record.amountPkr})")
                     put(
@@ -832,6 +835,7 @@ object FirebaseCloudManager {
             if (!isSupabaseConfigured()) return@launch
             try {
                 val payload = JSONObject().apply {
+                    put("id", java.util.UUID.randomUUID().toString())
                     put("type", "NEW_USER_REGISTRATION")
                     put("title", "New Client Registered: ${profile.name}")
                     put(

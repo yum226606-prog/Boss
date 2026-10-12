@@ -954,6 +954,66 @@ fun ProfileSettingsScreen(
                                         fontSize = 11.5.sp
                                     )
 
+                                    // Cloud Database & Admin Panel Live Sync Banner
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = Color(0xFF071410),
+                                        border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.5f)),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.weight(1f),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.CloudSync,
+                                                    contentDescription = null,
+                                                    tint = Color(0xFF10B981),
+                                                    modifier = Modifier.size(22.dp)
+                                                )
+                                                Column {
+                                                    Text(
+                                                        text = "Admin Panel Cloud Sync",
+                                                        color = Color.White,
+                                                        fontSize = 12.5.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                    Text(
+                                                        text = "Live Rates: ${state.rates.size} Gauges | ${state.customSections.size} Custom Sections",
+                                                        color = Color(0xFF10B981),
+                                                        fontSize = 10.5.sp
+                                                    )
+                                                }
+                                            }
+
+                                            Button(
+                                                onClick = {
+                                                    viewModel.syncUserProfileNow()
+                                                    Toast.makeText(context, "Syncing with Admin Panel...", Toast.LENGTH_SHORT).show()
+                                                },
+                                                shape = RoundedCornerShape(8.dp),
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                                modifier = Modifier.height(32.dp)
+                                            ) {
+                                                Text(
+                                                    text = "Sync Now",
+                                                    color = Color.Black,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+                                    }
+
                                     // Biometric Fingerprint Login Switch Row Configuration Element (Kept per Part 3)
                                     Surface(
                                         shape = RoundedCornerShape(10.dp),

@@ -114,7 +114,7 @@ class BossMasterEngineManager(private val context: Context) {
             while (isActive) {
                 if (SupabaseCloudManager.isSupabaseConfigured(context)) {
                     try {
-                        val parsed = withTimeoutOrNull(3000L) {
+                        val parsed = withTimeoutOrNull(8000L) {
                             val row = fetchMasterConfigRowFromSupabase()
                             if (row != null) parseJsonConfig(row) else null
                         }
@@ -345,7 +345,7 @@ class BossMasterEngineManager(private val context: Context) {
         SupabaseCloudManager.initContext(context)
         if (!SupabaseCloudManager.isSupabaseConfigured(context)) return@withContext null
         try {
-            val parsed = withTimeoutOrNull(3000L) {
+            val parsed = withTimeoutOrNull(8000L) {
                 val row = fetchMasterConfigRowFromSupabase() ?: return@withTimeoutOrNull null
                 parseJsonConfig(row)
             }

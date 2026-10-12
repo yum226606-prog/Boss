@@ -606,13 +606,14 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private fun startMasterLiveSyncListeners() {
+        // 0. Auto-sync registered user profile & subscription to Supabase so Admin Panel tracks them immediately
+        syncUserProfileNow()
+
         // 1. Verify User Security & Hardware Lock against `users` table with Server Timestamp
         verifyUserSecurityWithServerNow(force = true)
 
-        // 2. Real-time Master Engine Config listener (Formulas loaded ONLY when verified & active)
-        masterEngineManager.startRealtimeMasterSync(
-            isVerifiedAndSubscribedProvider = { isUserVerifiedAndSubscribed() }
-        ) { cloudConfig ->
+        // 2. Real-time Master Engine Config listener
+        masterEngineManager.startRealtimeMasterSync { cloudConfig ->
             applyMasterCloudConfig(cloudConfig)
         }
 
@@ -654,6 +655,23 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
                     }
                 }
             )
+        }
+    }
+
+    fun syncUserProfileNow() {
+        viewModelScope.launch {
+            val prof = _state.value.userProfile
+            if (prof.isRegistered) {
+                FirebaseCloudManager.syncUserProfileToFirestore(prof)
+                FirebaseCloudManager.syncSubscriptionToFirestore(
+                    deviceId = securityManager.getDeviceId(),
+                    subState = _state.value.subscriptionState
+                )
+            }
+            val cloudConfig = masterEngineManager.fetchLatestFromCloud(isVerifiedAndSubscribed = isUserVerifiedAndSubscribed())
+            if (cloudConfig != null) {
+                applyMasterCloudConfig(cloudConfig)
+            }
         }
     }
 
@@ -711,10 +729,10 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
     private fun applyMasterCloudConfig(cloudConfig: MasterEngineCloudConfig) {
         val currentProf = _state.value.userProfile
         val currentSub = _state.value.subscriptionState
-        if (currentSub.isAppLocked(currentProf)) {
+        val isLocked = currentSub.isAppLocked(currentProf)
+        if (isLocked) {
             masterEngineManager.clearRuntimeFormulas()
             resetAllFormulasToDefault()
-            return
         }
 
         val lastClearTs = prefs.getLong("last_admin_clear_rate_ts", 0L)
@@ -901,7 +919,7 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
                 customSections = mergedCustomSecs,
                 deletedSections = mergedDeleted,
                 hiddenSections = mergedHidden,
-                availableGauges = cloudConfig.availableGauges?.takeIf { it.isNotEmpty() } ?: cur.availableGauges,
+                availableGauges = ((cloudConfig.availableGauges ?: cur.availableGauges) + updatedRates.keys.filter { it.isNotBlank() }).distinct(),
                 availableColors = mergedAvailableColors.ifEmpty { cur.availableColors },
                 availableGlassGauges = cloudConfig.availableGlassGauges?.takeIf { it.isNotEmpty() } ?: cur.availableGlassGauges,
                 availableGlassColors5mm = cloudConfig.availableGlassColors5mm?.takeIf { it.isNotEmpty() } ?: cur.availableGlassColors5mm,
