@@ -42,9 +42,9 @@ object FirebaseCloudManager {
     private const val KEY_CUSTOM_SUPABASE_KEY = "custom_supabase_anon_key"
 
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .writeTimeout(15, TimeUnit.SECONDS)
+        .connectTimeout(3, TimeUnit.SECONDS)
+        .readTimeout(3, TimeUnit.SECONDS)
+        .writeTimeout(5, TimeUnit.SECONDS)
         .build()
 
     private val bgScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -1040,30 +1040,40 @@ object FirebaseCloudManager {
             isBlocked: Boolean,
             blockReason: String?,
             trialStart: Long,
-            activatedUntil: Long
+            activatedUntil: Long,
+            tierName: String?
         ) -> Unit
     ) {
         val ctx = appContext ?: return
-        startRealtimeAccountWatcher(
+        startRealtimeAccountWatcherInternal(
             context = ctx,
-            deviceId = deviceId
-        ) { accountStatus, subStatus, tierName, expiryEpochMs ->
-            val isBlocked = accountStatus.equals("BLOCKED", ignoreCase = true) ||
-                accountStatus.equals("SUSPENDED", ignoreCase = true)
-            val isLifetime = tierName?.contains("LIFETIME", ignoreCase = true) == true
-            val isAct = subStatus.equals("ACTIVE", ignoreCase = true) ||
-                subStatus.equals("AUTO_ACTIVATED", ignoreCase = true) ||
-                isLifetime
-            val blockReason = if (isBlocked) "Account blocked by Master Admin ($accountStatus)" else null
-            onAccountStateChanged(
-                isAct,
-                isLifetime,
-                isBlocked,
-                blockReason,
-                0L,
-                expiryEpochMs ?: 0L
-            )
+            deviceId = deviceId,
+            phone = phone,
+            cnic = cnic,
+            email = email,
+            onAccountStateChanged = onAccountStateChanged
+        )
+    }
+
+    private fun normalizeEpochMs(rawVal: Long): Long {
+        if (rawVal <= 0L) return rawVal
+        // Convert 10-digit epoch seconds to milliseconds if needed
+        return if (rawVal in 1_000_000_000L..9_999_999_999L) rawVal * 1000L else rawVal
+    }
+
+    private fun parseExpiryFromObj(obj: JSONObject): Long? {
+        val keys = listOf("subscription_expiry", "activated_until", "expiry_date_epoch_ms", "subscriptionExpiry", "activatedUntil")
+        for (k in keys) {
+            if (obj.has(k) && !obj.isNull(k)) {
+                val longVal = obj.optLong(k, -1L)
+                if (longVal >= 0L) return normalizeEpochMs(longVal)
+                val strVal = obj.optString(k, "").trim()
+                if (strVal.isNotEmpty()) {
+                    strVal.toLongOrNull()?.let { return normalizeEpochMs(it) }
+                }
+            }
         }
+        return null
     }
 
     /**
@@ -1081,12 +1091,13 @@ object FirebaseCloudManager {
             blockReason: String?,
             isActivated: Boolean?,
             isLifetime: Boolean,
-            expiryEpochMs: Long?
+            expiryEpochMs: Long?,
+            tierName: String?
         ) -> Unit
     ) {
         initContext(context)
         val devId = profile.deviceId.ifBlank { paymentDeviceIdFallback(profile) }
-        if (devId.isBlank() || !isSupabaseConfigured(context)) return
+        if ((devId.isBlank() && profile.phone.isBlank() && profile.cnic.isBlank()) || !isSupabaseConfigured(context)) return
 
         bgScope.launch {
             try {
@@ -1097,6 +1108,8 @@ object FirebaseCloudManager {
                 var isActivated: Boolean? = null
                 var isLifetime = false
                 var expiryMs: Long? = null
+                var tierName: String? = null
+                var matchedDeviceId = devId
 
                 fun parseServerDateHeader(resp: okhttp3.Response) {
                     val dateStr = resp.header("Date") ?: resp.header("date")
@@ -1110,103 +1123,149 @@ object FirebaseCloudManager {
                     }
                 }
 
-                // 1. Check `users` table (Master Admin primary users table)
                 val cleanPhone = profile.phone.trim()
+                val formattedPhone = if (cleanPhone.isNotBlank()) formatPakistanPhone(cleanPhone) else ""
+                val localPhone = if (formattedPhone.startsWith("+92")) "0" + formattedPhone.removePrefix("+92") else cleanPhone
                 val cleanCnic = profile.cnic.replace("-", "").trim()
-                val filterParts = mutableListOf("device_id.eq.$devId")
+                val dashedCnic = profile.cnic.trim()
+
+                val filterParts = mutableListOf<String>()
+                if (devId.isNotBlank()) filterParts.add("device_id.eq.$devId")
                 if (cleanPhone.length >= 10) filterParts.add("phone.eq.$cleanPhone")
+                if (localPhone.length >= 10 && localPhone != cleanPhone) filterParts.add("phone.eq.$localPhone")
+                if (formattedPhone.length >= 10 && formattedPhone != cleanPhone) filterParts.add("phone.eq.$formattedPhone")
                 if (cleanCnic.length >= 13) filterParts.add("cnic.eq.$cleanCnic")
-                val usersFilter = filterParts.joinToString(",")
+                if (dashedCnic.length >= 13 && dashedCnic != cleanCnic) filterParts.add("cnic.eq.$dashedCnic")
+                val usersFilter = filterParts.distinct().joinToString(",")
 
-                val usersReq = buildSupabaseRequest(
-                    path = "/rest/v1/users?or=($usersFilter)&limit=1",
-                    method = "GET",
-                    preferHeader = null
-                )
-                if (usersReq != null) {
-                    httpClient.newCall(usersReq).execute().use { resp ->
-                        parseServerDateHeader(resp)
-                        if (resp.isSuccessful) {
-                            val arr = JSONArray(resp.body?.string().orEmpty())
-                            if (arr.length() > 0) {
-                                val uObj = arr.getJSONObject(0)
-                                val remoteDevId = uObj.optString("device_id", "").trim()
-                                if (remoteDevId.isNotBlank() && !remoteDevId.equals(devId, ignoreCase = true) && !profile.isVipOwner) {
-                                    isDeviceMismatch = true
-                                    blockReason = "Single-Device Hardware Lock: Account bound to another device ($remoteDevId)."
-                                }
-                                val blockedFlag = uObj.optBoolean("isBlocked", false) ||
-                                    uObj.optBoolean("is_blocked", false) ||
-                                    uObj.optString("account_status", "APPROVED").equals("BLOCKED", ignoreCase = true) ||
-                                    uObj.optString("account_status", "APPROVED").equals("SUSPENDED", ignoreCase = true)
-                                if (blockedFlag) {
-                                    isBlocked = true
-                                    blockReason = uObj.optString("block_reason").ifBlank { "Account blocked by Master Admin." }
-                                }
-                                val exp = uObj.optLong("subscription_expiry", uObj.optLong("expiry_date_epoch_ms", uObj.optLong("activated_until", -1L)))
-                                if (exp >= 0L) {
-                                    expiryMs = exp
-                                }
-                                val tierStr = uObj.optString("subscription_tier", uObj.optString("tier", ""))
-                                if (tierStr.contains("LIFETIME", ignoreCase = true) || uObj.optBoolean("is_lifetime", false)) {
-                                    isLifetime = true
-                                    isActivated = true
-                                } else if (uObj.has("is_activated") || uObj.has("isActivated")) {
-                                    val act = uObj.optBoolean("is_activated", uObj.optBoolean("isActivated", false))
-                                    isActivated = act && (expiryMs == null || expiryMs == 0L || expiryMs!! > serverTimeMs)
+                fun applyUserRow(uObj: JSONObject, checkDeviceLock: Boolean) {
+                    val remoteDevId = uObj.optString("device_id", "").trim()
+                    if (remoteDevId.isNotBlank()) {
+                        matchedDeviceId = remoteDevId
+                        if (checkDeviceLock && devId.isNotBlank() && !remoteDevId.equals(devId, ignoreCase = true) && !profile.isVipOwner) {
+                            isDeviceMismatch = true
+                            blockReason = "Single-Device Hardware Lock: Account bound to another device ($remoteDevId)."
+                        }
+                    }
+                    val accStatus = uObj.optString("account_status", "APPROVED")
+                    val blockedFlag = uObj.optBoolean("isBlocked", false) ||
+                        uObj.optBoolean("is_blocked", false) ||
+                        accStatus.equals("BLOCKED", ignoreCase = true) ||
+                        accStatus.equals("SUSPENDED", ignoreCase = true)
+                    if (blockedFlag) {
+                        isBlocked = true
+                        blockReason = uObj.optString("lock_reason", "")
+                            .ifBlank { uObj.optString("block_reason", "") }
+                            .ifBlank { uObj.optString("lockReason", "") }
+                            .ifBlank { "Account blocked by Master Admin." }
+                    }
+                    parseExpiryFromObj(uObj)?.let { exp ->
+                        expiryMs = exp
+                    }
+                    val tStr = uObj.optString("subscription_tier", uObj.optString("tier", "")).trim()
+                    if (tStr.isNotEmpty()) {
+                        tierName = tStr
+                    }
+                    val lifetimeFlag = tStr.contains("LIFETIME", ignoreCase = true) ||
+                        uObj.optBoolean("is_lifetime", false) ||
+                        uObj.optBoolean("isLifetime", false) ||
+                        uObj.optBoolean("is_lifetime_free", false)
+                    val subStatusStr = uObj.optString("subscription_status", uObj.optString("status", ""))
+                    if (lifetimeFlag) {
+                        isLifetime = true
+                        isActivated = true
+                    } else if (uObj.has("is_activated") || uObj.has("isActivated")) {
+                        val act = uObj.optBoolean("is_activated", uObj.optBoolean("isActivated", false))
+                        isActivated = act && (expiryMs == null || expiryMs == 0L || expiryMs!! > serverTimeMs)
+                    } else if (subStatusStr.equals("ACTIVE", ignoreCase = true) || subStatusStr.equals("AUTO_ACTIVATED", ignoreCase = true)) {
+                        isActivated = expiryMs == null || expiryMs == 0L || expiryMs!! > serverTimeMs
+                    } else if (expiryMs != null && expiryMs!! > serverTimeMs) {
+                        isActivated = true
+                    } else if (expiryMs != null && expiryMs!! in 1L..serverTimeMs) {
+                        isActivated = false
+                    }
+                }
+
+                // 1. Check `users` table
+                if (usersFilter.isNotBlank()) {
+                    val usersReq = buildSupabaseRequest(
+                        path = "/rest/v1/users?or=($usersFilter)&limit=1",
+                        method = "GET",
+                        preferHeader = null
+                    )
+                    if (usersReq != null) {
+                        httpClient.newCall(usersReq).execute().use { resp ->
+                            parseServerDateHeader(resp)
+                            if (resp.isSuccessful) {
+                                val arr = JSONArray(resp.body?.string().orEmpty())
+                                if (arr.length() > 0) {
+                                    applyUserRow(arr.getJSONObject(0), checkDeviceLock = true)
                                 }
                             }
                         }
                     }
                 }
 
-                // 2. Also check `client_users` and `subscriptions` tables
-                val userReq = buildSupabaseRequest(
-                    path = "/rest/v1/client_users?device_id=eq.$devId&select=account_status,device_id&limit=1",
-                    method = "GET",
-                    preferHeader = null
-                )
-                if (userReq != null) {
-                    httpClient.newCall(userReq).execute().use { resp ->
-                        parseServerDateHeader(resp)
-                        if (resp.isSuccessful) {
-                            val arr = JSONArray(resp.body?.string().orEmpty())
-                            if (arr.length() > 0) {
-                                val cObj = arr.getJSONObject(0)
-                                val accStatus = cObj.optString("account_status", "APPROVED")
-                                if (accStatus.equals("BLOCKED", ignoreCase = true) || accStatus.equals("SUSPENDED", ignoreCase = true)) {
-                                    isBlocked = true
-                                    blockReason = "Account blocked by Master Admin ($accStatus)"
+                // 2. Check `client_users` table with same filter
+                if (usersFilter.isNotBlank()) {
+                    val clientUsersReq = buildSupabaseRequest(
+                        path = "/rest/v1/client_users?or=($usersFilter)&limit=1",
+                        method = "GET",
+                        preferHeader = null
+                    )
+                    if (clientUsersReq != null) {
+                        httpClient.newCall(clientUsersReq).execute().use { resp ->
+                            parseServerDateHeader(resp)
+                            if (resp.isSuccessful) {
+                                val arr = JSONArray(resp.body?.string().orEmpty())
+                                if (arr.length() > 0) {
+                                    applyUserRow(arr.getJSONObject(0), checkDeviceLock = false)
                                 }
                             }
                         }
                     }
                 }
 
-                val subReq = buildSupabaseRequest(
-                    path = "/rest/v1/subscriptions?device_id=eq.$devId&select=status,tier,expiry_date_epoch_ms&limit=1",
-                    method = "GET",
-                    preferHeader = null
-                )
-                if (subReq != null) {
-                    httpClient.newCall(subReq).execute().use { resp ->
-                        parseServerDateHeader(resp)
-                        if (resp.isSuccessful) {
-                            val arr = JSONArray(resp.body?.string().orEmpty())
-                            if (arr.length() > 0) {
-                                val sObj = arr.getJSONObject(0)
-                                val subStatus = sObj.optString("status")
-                                val tierName = sObj.optString("tier")
-                                if (sObj.has("expiry_date_epoch_ms")) {
-                                    expiryMs = sObj.optLong("expiry_date_epoch_ms")
-                                }
-                                if (tierName.contains("LIFETIME", ignoreCase = true)) {
-                                    isLifetime = true
-                                    isActivated = true
-                                } else if (subStatus.equals("ACTIVE", ignoreCase = true) || subStatus.equals("AUTO_ACTIVATED", ignoreCase = true)) {
-                                    isActivated = expiryMs == null || expiryMs == 0L || expiryMs!! > serverTimeMs
-                                } else if (subStatus.equals("EXPIRED", ignoreCase = true) || subStatus.equals("LOCKED", ignoreCase = true)) {
-                                    isActivated = false
+                // 3. Check `subscriptions` table
+                val subFilterParts = mutableListOf<String>()
+                if (matchedDeviceId.isNotBlank()) subFilterParts.add("device_id.eq.$matchedDeviceId")
+                if (devId.isNotBlank() && devId != matchedDeviceId) subFilterParts.add("device_id.eq.$devId")
+                val subFilter = subFilterParts.joinToString(",")
+                if (subFilter.isNotBlank()) {
+                    val subReq = buildSupabaseRequest(
+                        path = "/rest/v1/subscriptions?or=($subFilter)&limit=1",
+                        method = "GET",
+                        preferHeader = null
+                    )
+                    if (subReq != null) {
+                        httpClient.newCall(subReq).execute().use { resp ->
+                            parseServerDateHeader(resp)
+                            if (resp.isSuccessful) {
+                                val arr = JSONArray(resp.body?.string().orEmpty())
+                                if (arr.length() > 0) {
+                                    val sObj = arr.getJSONObject(0)
+                                    val subStatus = sObj.optString("status", sObj.optString("subscription_status", ""))
+                                    val sTier = sObj.optString("subscription_tier", sObj.optString("tier", "")).trim()
+                                    if (sTier.isNotEmpty()) tierName = sTier
+                                    parseExpiryFromObj(sObj)?.let { expiryMs = it }
+                                    if (sTier.contains("LIFETIME", ignoreCase = true) ||
+                                        sObj.optBoolean("is_lifetime", false) ||
+                                        sObj.optBoolean("isLifetime", false)
+                                    ) {
+                                        isLifetime = true
+                                        isActivated = true
+                                    } else if (sObj.has("is_activated") || sObj.has("isActivated")) {
+                                        val act = sObj.optBoolean("is_activated", sObj.optBoolean("isActivated", false))
+                                        isActivated = act && (expiryMs == null || expiryMs == 0L || expiryMs!! > serverTimeMs)
+                                    } else if (subStatus.equals("ACTIVE", ignoreCase = true) || subStatus.equals("AUTO_ACTIVATED", ignoreCase = true)) {
+                                        isActivated = expiryMs == null || expiryMs == 0L || expiryMs!! > serverTimeMs
+                                    } else if (subStatus.equals("EXPIRED", ignoreCase = true) || subStatus.equals("LOCKED", ignoreCase = true)) {
+                                        isActivated = false
+                                    }
+                                    if (sObj.optBoolean("isBlocked", false) || sObj.optBoolean("is_blocked", false)) {
+                                        isBlocked = true
+                                        blockReason = sObj.optString("lock_reason", sObj.optString("block_reason", blockReason ?: "Account blocked by Master Admin."))
+                                    }
                                 }
                             }
                         }
@@ -1214,7 +1273,7 @@ object FirebaseCloudManager {
                 }
 
                 withContext(Dispatchers.Main) {
-                    onVerified(serverTimeMs, isDeviceMismatch, isBlocked, blockReason, isActivated, isLifetime, expiryMs)
+                    onVerified(serverTimeMs, isDeviceMismatch, isBlocked, blockReason, isActivated, isLifetime, expiryMs, tierName)
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "verifyUserSecurityOnServer warning: ${e.message}")
@@ -1224,98 +1283,165 @@ object FirebaseCloudManager {
 
     /**
      * Starts real-time security & subscription watcher against the Master Admin App's Supabase tables
-     * (`users`, `client_users`, and `subscriptions`) so any block, unblock, or subscription update from the
-     * Admin App immediately applies to this Client App.
+     * (`users`, `client_users`, and `subscriptions`) matching `device_id`, `phone`, or `cnic`
+     * so any block, unblock, or subscription update from the Admin App immediately applies.
      */
-    fun startRealtimeAccountWatcher(
+    private fun startRealtimeAccountWatcherInternal(
         context: Context,
         deviceId: String,
-        onStatusChanged: (accountStatus: String, subStatus: String?, tierName: String?, expiryEpochMs: Long?) -> Unit
+        phone: String,
+        cnic: String,
+        email: String,
+        onAccountStateChanged: (
+            isActivated: Boolean,
+            isLifetimeFree: Boolean,
+            isBlocked: Boolean,
+            blockReason: String?,
+            trialStart: Long,
+            activatedUntil: Long,
+            tierName: String?
+        ) -> Unit
     ) {
         initContext(context)
         stopRealtimeAccountWatcher()
-        if (deviceId.isBlank()) return
+        if (deviceId.isBlank() && phone.isBlank() && cnic.isBlank()) return
 
         watcherJob = bgScope.launch {
             while (isActive) {
                 if (isSupabaseConfigured(context)) {
                     try {
-                        var currentAccStatus = "APPROVED"
-                        var subStatus: String? = null
+                        var isBlocked = false
+                        var lockReason: String? = null
+                        var isActivated = false
+                        var isLifetime = false
                         var tierName: String? = null
                         var expiryMs: Long? = null
+                        var trialStartMs = 0L
                         var serverNow = System.currentTimeMillis()
+                        var matchedDeviceId = deviceId
 
-                        // Check `users` table first
-                        val usersReq = buildSupabaseRequest(
-                            path = "/rest/v1/users?device_id=eq.$deviceId&limit=1",
-                            method = "GET",
-                            preferHeader = null
-                        )
-                        if (usersReq != null) {
-                            httpClient.newCall(usersReq).execute().use { resp ->
-                                val dateStr = resp.header("Date") ?: resp.header("date")
-                                if (!dateStr.isNullOrBlank()) {
-                                    try {
-                                        val parsed = java.text.SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", java.util.Locale.US).parse(dateStr)
-                                        if (parsed != null && parsed.time > 1700000000000L) serverNow = parsed.time
-                                    } catch (_: Exception) {}
-                                }
-                                if (resp.isSuccessful) {
-                                    val arr = JSONArray(resp.body?.string().orEmpty())
-                                    if (arr.length() > 0) {
-                                        val uObj = arr.getJSONObject(0)
-                                        val isBlk = uObj.optBoolean("isBlocked", false) ||
-                                            uObj.optBoolean("is_blocked", false) ||
-                                            uObj.optString("account_status", "APPROVED").equals("BLOCKED", ignoreCase = true)
-                                        if (isBlk) currentAccStatus = "BLOCKED"
-                                        val exp = uObj.optLong("subscription_expiry", uObj.optLong("expiry_date_epoch_ms", -1L))
-                                        if (exp > 0L) {
-                                            expiryMs = exp
-                                            if (exp <= serverNow) subStatus = "EXPIRED"
+                        val cleanPhone = phone.trim()
+                        val formattedPhone = if (cleanPhone.isNotBlank()) formatPakistanPhone(cleanPhone) else ""
+                        val localPhone = if (formattedPhone.startsWith("+92")) "0" + formattedPhone.removePrefix("+92") else cleanPhone
+                        val cleanCnic = cnic.replace("-", "").trim()
+                        val dashedCnic = cnic.trim()
+
+                        val filterParts = mutableListOf<String>()
+                        if (deviceId.isNotBlank()) filterParts.add("device_id.eq.$deviceId")
+                        if (cleanPhone.length >= 10) filterParts.add("phone.eq.$cleanPhone")
+                        if (localPhone.length >= 10 && localPhone != cleanPhone) filterParts.add("phone.eq.$localPhone")
+                        if (formattedPhone.length >= 10 && formattedPhone != cleanPhone) filterParts.add("phone.eq.$formattedPhone")
+                        if (cleanCnic.length >= 13) filterParts.add("cnic.eq.$cleanCnic")
+                        if (dashedCnic.length >= 13 && dashedCnic != cleanCnic) filterParts.add("cnic.eq.$dashedCnic")
+                        val usersFilter = filterParts.distinct().joinToString(",")
+
+                        fun parseRow(uObj: JSONObject) {
+                            val remoteDev = uObj.optString("device_id", "").trim()
+                            if (remoteDev.isNotBlank()) matchedDeviceId = remoteDev
+                            val accStatus = uObj.optString("account_status", "APPROVED")
+                            val blk = uObj.optBoolean("isBlocked", false) ||
+                                uObj.optBoolean("is_blocked", false) ||
+                                accStatus.equals("BLOCKED", ignoreCase = true) ||
+                                accStatus.equals("SUSPENDED", ignoreCase = true)
+                            if (blk) {
+                                isBlocked = true
+                                lockReason = uObj.optString("lock_reason", "")
+                                    .ifBlank { uObj.optString("block_reason", "") }
+                                    .ifBlank { uObj.optString("lockReason", "") }
+                                    .ifBlank { "Account blocked by Master Admin ($accStatus)" }
+                            }
+                            val tStart = uObj.optLong("trial_start_time", uObj.optLong("start_date_epoch_ms", 0L))
+                            if (tStart > 0L) trialStartMs = normalizeEpochMs(tStart)
+
+                            parseExpiryFromObj(uObj)?.let { exp ->
+                                expiryMs = exp
+                            }
+                            val tStr = uObj.optString("subscription_tier", uObj.optString("tier", "")).trim()
+                            if (tStr.isNotEmpty()) tierName = tStr
+
+                            val lifeFlag = tStr.contains("LIFETIME", ignoreCase = true) ||
+                                uObj.optBoolean("is_lifetime", false) ||
+                                uObj.optBoolean("isLifetime", false) ||
+                                uObj.optBoolean("is_lifetime_free", false)
+                            val subSt = uObj.optString("subscription_status", uObj.optString("status", ""))
+
+                            if (lifeFlag) {
+                                isLifetime = true
+                                isActivated = true
+                            } else if (uObj.has("is_activated") || uObj.has("isActivated")) {
+                                val act = uObj.optBoolean("is_activated", uObj.optBoolean("isActivated", false))
+                                isActivated = act && (expiryMs == null || expiryMs == 0L || expiryMs!! > serverNow)
+                            } else if (subSt.equals("ACTIVE", ignoreCase = true) || subSt.equals("AUTO_ACTIVATED", ignoreCase = true)) {
+                                isActivated = expiryMs == null || expiryMs == 0L || expiryMs!! > serverNow
+                            } else if (subSt.equals("EXPIRED", ignoreCase = true) || subSt.equals("LOCKED", ignoreCase = true)) {
+                                isActivated = false
+                            } else if (expiryMs != null && expiryMs!! > serverNow) {
+                                isActivated = true
+                            }
+                        }
+
+                        // 1. Check `users` table (device_id, phone, or cnic)
+                        if (usersFilter.isNotBlank()) {
+                            val usersReq = buildSupabaseRequest(
+                                path = "/rest/v1/users?or=($usersFilter)&limit=1",
+                                method = "GET",
+                                preferHeader = null
+                            )
+                            if (usersReq != null) {
+                                httpClient.newCall(usersReq).execute().use { resp ->
+                                    val dateStr = resp.header("Date") ?: resp.header("date")
+                                    if (!dateStr.isNullOrBlank()) {
+                                        try {
+                                            val parsed = java.text.SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", java.util.Locale.US).parse(dateStr)
+                                            if (parsed != null && parsed.time > 1700000000000L) serverNow = parsed.time
+                                        } catch (_: Exception) {}
+                                    }
+                                    if (resp.isSuccessful) {
+                                        val arr = JSONArray(resp.body?.string().orEmpty())
+                                        if (arr.length() > 0) {
+                                            parseRow(arr.getJSONObject(0))
                                         }
                                     }
                                 }
                             }
                         }
 
-                        val userReq = buildSupabaseRequest(
-                            path = "/rest/v1/client_users?device_id=eq.$deviceId&select=account_status&limit=1",
-                            method = "GET",
-                            preferHeader = null
-                        )
-                        if (userReq != null) {
-                            httpClient.newCall(userReq).execute().use { resp ->
-                                if (resp.isSuccessful) {
-                                    val arr = JSONArray(resp.body?.string().orEmpty())
-                                    if (arr.length() > 0) {
-                                        val st = arr.getJSONObject(0).optString("account_status", "APPROVED")
-                                        if (st.equals("BLOCKED", ignoreCase = true) || st.equals("SUSPENDED", ignoreCase = true)) {
-                                            currentAccStatus = st
+                        // 2. Check `client_users` table (device_id, phone, or cnic)
+                        if (usersFilter.isNotBlank()) {
+                            val userReq = buildSupabaseRequest(
+                                path = "/rest/v1/client_users?or=($usersFilter)&limit=1",
+                                method = "GET",
+                                preferHeader = null
+                            )
+                            if (userReq != null) {
+                                httpClient.newCall(userReq).execute().use { resp ->
+                                    if (resp.isSuccessful) {
+                                        val arr = JSONArray(resp.body?.string().orEmpty())
+                                        if (arr.length() > 0) {
+                                            parseRow(arr.getJSONObject(0))
                                         }
                                     }
                                 }
                             }
                         }
 
-                        val subReq = buildSupabaseRequest(
-                            path = "/rest/v1/subscriptions?device_id=eq.$deviceId&select=status,tier,expiry_date_epoch_ms&limit=1",
-                            method = "GET",
-                            preferHeader = null
-                        )
-                        if (subReq != null) {
-                            httpClient.newCall(subReq).execute().use { resp ->
-                                if (resp.isSuccessful) {
-                                    val arr = JSONArray(resp.body?.string().orEmpty())
-                                    if (arr.length() > 0) {
-                                        val sObj = arr.getJSONObject(0)
-                                        subStatus = sObj.optString("status").takeIf { it.isNotBlank() } ?: subStatus
-                                        tierName = sObj.optString("tier").takeIf { it.isNotBlank() }
-                                        if (sObj.has("expiry_date_epoch_ms")) {
-                                            expiryMs = sObj.optLong("expiry_date_epoch_ms")
-                                            if (expiryMs != null && expiryMs!! > 0L && expiryMs!! <= serverNow && tierName?.contains("LIFETIME", true) != true) {
-                                                subStatus = "EXPIRED"
-                                            }
+                        // 3. Check `subscriptions` table
+                        val subFilterParts = mutableListOf<String>()
+                        if (matchedDeviceId.isNotBlank()) subFilterParts.add("device_id.eq.$matchedDeviceId")
+                        if (deviceId.isNotBlank() && deviceId != matchedDeviceId) subFilterParts.add("device_id.eq.$deviceId")
+                        val subFilter = subFilterParts.joinToString(",")
+                        if (subFilter.isNotBlank()) {
+                            val subReq = buildSupabaseRequest(
+                                path = "/rest/v1/subscriptions?or=($subFilter)&limit=1",
+                                method = "GET",
+                                preferHeader = null
+                            )
+                            if (subReq != null) {
+                                httpClient.newCall(subReq).execute().use { resp ->
+                                    if (resp.isSuccessful) {
+                                        val arr = JSONArray(resp.body?.string().orEmpty())
+                                        if (arr.length() > 0) {
+                                            parseRow(arr.getJSONObject(0))
                                         }
                                     }
                                 }
@@ -1323,7 +1449,15 @@ object FirebaseCloudManager {
                         }
 
                         withContext(Dispatchers.Main) {
-                            onStatusChanged(currentAccStatus, subStatus, tierName, expiryMs)
+                            onAccountStateChanged(
+                                isActivated && !isBlocked,
+                                isLifetime,
+                                isBlocked,
+                                lockReason,
+                                trialStartMs,
+                                expiryMs ?: 0L,
+                                tierName
+                            )
                         }
                     } catch (e: Exception) {
                         Log.w(TAG, "Supabase security poll warning: ${e.message}")
@@ -1373,6 +1507,33 @@ object FirebaseCloudManager {
             }
         }
     }
+
+    /**
+     * Fetches all rows from a Supabase table (`/rest/v1/$table?select=*`) so the Client App
+     * can load all Admin Panel configuration keys directly on startup without a registration gate.
+     */
+    suspend fun fetchAllTableRows(table: String): List<JSONObject> =
+        withContext(Dispatchers.IO) {
+            if (!isSupabaseConfigured()) return@withContext emptyList()
+            try {
+                val req = buildSupabaseRequest(
+                    path = "/rest/v1/$table?select=*",
+                    method = "GET",
+                    preferHeader = null
+                ) ?: return@withContext emptyList()
+                httpClient.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withContext emptyList()
+                    val arr = JSONArray(resp.body?.string().orEmpty())
+                    val list = mutableListOf<JSONObject>()
+                    for (i in 0 until arr.length()) {
+                        arr.optJSONObject(i)?.let { list.add(it) }
+                    }
+                    list
+                }
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
 
     /**
      * Generic helper for Master Engine & Master Admin managers to query or upsert Supabase JSON documents.

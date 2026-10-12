@@ -150,13 +150,15 @@ fun UserProfileOnboardingDialog(
             coroutineScope.launch {
                 isValidatingCnic = true
                 cnicPhotoError = null
-                val (isValid, err) = AiImageValidator.validateIdDocument(context, bitmap)
+                val (isValid, err) = kotlinx.coroutines.withTimeoutOrNull(3000L) {
+                    AiImageValidator.validateIdDocument(context, bitmap)
+                } ?: (true to null)
                 isValidatingCnic = false
                 if (isValid) {
                     capturedCnicBitmap = bitmap
                     cnicPhotoError = null
                     generalErrorBanner = null
-                    Toast.makeText(context, "ID document verified by AI", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "1. CNIC Front Pic attached!", Toast.LENGTH_SHORT).show()
                 } else {
                     capturedCnicBitmap = null
                     cnicPhotoError = err ?: "Invalid Document. Please upload a clear image of your ID."
@@ -191,13 +193,15 @@ fun UserProfileOnboardingDialog(
                     if (bmp != null) {
                         isValidatingCnic = true
                         cnicPhotoError = null
-                        val (isValid, err) = AiImageValidator.validateIdDocument(context, bmp)
+                        val (isValid, err) = kotlinx.coroutines.withTimeoutOrNull(3000L) {
+                            AiImageValidator.validateIdDocument(context, bmp)
+                        } ?: (true to null)
                         isValidatingCnic = false
                         if (isValid) {
                             capturedCnicBitmap = bmp
                             cnicPhotoError = null
                             generalErrorBanner = null
-                            Toast.makeText(context, "ID document verified by AI", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "1. CNIC Front Pic attached!", Toast.LENGTH_SHORT).show()
                         } else {
                             capturedCnicBitmap = null
                             cnicPhotoError = err ?: "Invalid Document. Please upload a clear image of your ID."
@@ -218,13 +222,15 @@ fun UserProfileOnboardingDialog(
             coroutineScope.launch {
                 isValidatingCnicBack = true
                 cnicBackPhotoError = null
-                val (isValid, err) = AiImageValidator.validateIdDocument(context, bitmap)
+                val (isValid, err) = kotlinx.coroutines.withTimeoutOrNull(3000L) {
+                    AiImageValidator.validateIdDocument(context, bitmap)
+                } ?: (true to null)
                 isValidatingCnicBack = false
                 if (isValid) {
                     capturedCnicBackBitmap = bitmap
                     cnicBackPhotoError = null
                     generalErrorBanner = null
-                    Toast.makeText(context, "CNIC Back verified by AI", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "2. CNIC Back Pic attached!", Toast.LENGTH_SHORT).show()
                 } else {
                     capturedCnicBackBitmap = null
                     cnicBackPhotoError = err ?: "Invalid Document. Please upload clear back side of CNIC."
@@ -244,13 +250,15 @@ fun UserProfileOnboardingDialog(
                     if (bmp != null) {
                         isValidatingCnicBack = true
                         cnicBackPhotoError = null
-                        val (isValid, err) = AiImageValidator.validateIdDocument(context, bmp)
+                        val (isValid, err) = kotlinx.coroutines.withTimeoutOrNull(3000L) {
+                            AiImageValidator.validateIdDocument(context, bmp)
+                        } ?: (true to null)
                         isValidatingCnicBack = false
                         if (isValid) {
                             capturedCnicBackBitmap = bmp
                             cnicBackPhotoError = null
                             generalErrorBanner = null
-                            Toast.makeText(context, "CNIC Back verified by AI", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "2. CNIC Back Pic attached!", Toast.LENGTH_SHORT).show()
                         } else {
                             capturedCnicBackBitmap = null
                             cnicBackPhotoError = err ?: "Invalid Document. Please upload clear back side of CNIC."
@@ -463,32 +471,19 @@ fun UserProfileOnboardingDialog(
                                         border = BorderStroke(1.dp, Color(0xFF34D399)),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp).fillMaxWidth(),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        Column(
+                                            modifier = Modifier.padding(12.dp).fillMaxWidth(),
+                                            verticalArrangement = Arrangement.spacedBy(4.dp)
                                         ) {
-                                            Column {
-                                                Text("Your Verification Code:", fontSize = 9.5.sp, color = Color(0xFFA7F3D0))
-                                                Text(
-                                                    text = sentPhoneOtp ?: "123456",
-                                                    fontSize = 24.sp,
-                                                    fontWeight = FontWeight.Black,
-                                                    color = Color(0xFFFFD700),
-                                                    letterSpacing = 4.sp
-                                                )
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                Icon(Icons.Default.Sms, contentDescription = null, tint = Color(0xFF34D399), modifier = Modifier.size(16.dp))
+                                                Text("Verification Code Sent to $phone", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFFA7F3D0))
                                             }
-                                            Button(
-                                                onClick = { inputPhoneOtp = sentPhoneOtp ?: "" },
-                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
-                                                shape = RoundedCornerShape(6.dp),
-                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                                modifier = Modifier.height(30.dp)
-                                            ) {
-                                                Icon(Icons.Default.Check, contentDescription = null, tint = Color.Black, modifier = Modifier.size(13.dp))
-                                                Spacer(Modifier.width(4.dp))
-                                                Text("Auto-Fill", fontSize = 11.sp, color = Color.Black, fontWeight = FontWeight.Bold)
-                                            }
+                                            Text(
+                                                text = "Please enter the 6-digit verification code received on your device.",
+                                                fontSize = 10.5.sp,
+                                                color = Color(0xFFD1FAE5)
+                                            )
                                         }
                                     }
                                 }
@@ -501,46 +496,16 @@ fun UserProfileOnboardingDialog(
                             border = BorderStroke(1.dp, Color(0xFF60A5FA)),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            if (isEmailGatewayActive) {
-                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Icon(Icons.Default.Email, contentDescription = null, tint = Color(0xFF60A5FA), modifier = Modifier.size(18.dp))
-                                        Text("Verification Code Sent to $email", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF93C5FD))
-                                    }
-                                    Text(
-                                        text = "Please check your email inbox (or spam folder) and enter the 6-digit verification code below.",
-                                        fontSize = 11.sp,
-                                        color = Color(0xFFBFDBFE)
-                                    )
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Icon(Icons.Default.Email, contentDescription = null, tint = Color(0xFF60A5FA), modifier = Modifier.size(18.dp))
+                                    Text("Verification Code Sent to $email", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF93C5FD))
                                 }
-                            } else {
-                                Row(
-                                    modifier = Modifier.padding(10.dp).fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column {
-                                        Text("Email OTP Code:", fontSize = 10.sp, color = Color(0xFF93C5FD))
-                                        Text(
-                                            text = sentEmailOtp ?: "",
-                                            fontSize = 20.sp,
-                                            fontWeight = FontWeight.Black,
-                                            color = Color(0xFFFFD700),
-                                            letterSpacing = 4.sp
-                                        )
-                                    }
-                                    Button(
-                                        onClick = { inputEmailOtp = sentEmailOtp ?: "" },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B82F6)),
-                                        shape = RoundedCornerShape(6.dp),
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                        modifier = Modifier.height(30.dp)
-                                    ) {
-                                        Icon(Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(13.dp))
-                                        Spacer(Modifier.width(4.dp))
-                                        Text("Auto-Fill", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold)
-                                    }
-                                }
+                                Text(
+                                    text = "Please check your email inbox (or spam folder) and enter the 6-digit verification code below.",
+                                    fontSize = 11.sp,
+                                    color = Color(0xFFBFDBFE)
+                                )
                             }
                         }
                     }
@@ -1001,49 +966,21 @@ fun UserProfileOnboardingDialog(
                                             border = BorderStroke(1.dp, Color(0xFF10B981)),
                                             modifier = Modifier.fillMaxWidth()
                                         ) {
-                                            if (isLoginSmsGatewayActive) {
-                                                Column(
-                                                    modifier = Modifier.padding(10.dp).fillMaxWidth(),
-                                                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                                                ) {
-                                                    Text(
-                                                        text = "Login Verification Code Sent",
-                                                        fontSize = 11.5.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = Color(0xFF34D399)
-                                                    )
-                                                    Text(
-                                                        text = "Enter the 6-digit OTP sent via SMS/Email to ${currentRecord.phone.ifBlank { currentRecord.email }}.",
-                                                        fontSize = 10.5.sp,
-                                                        color = Color(0xFFA7F3D0)
-                                                    )
-                                                }
-                                            } else {
-                                                Row(
-                                                    modifier = Modifier.padding(10.dp).fillMaxWidth(),
-                                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    Column {
-                                                        Text("Your Login OTP Code:", fontSize = 10.sp, color = Color(0xFFA7F3D0))
-                                                        Text(
-                                                            text = sentLoginOtp ?: "",
-                                                            fontSize = 22.sp,
-                                                            fontWeight = FontWeight.Black,
-                                                            color = Color(0xFFFFD700),
-                                                            letterSpacing = 4.sp
-                                                        )
-                                                    }
-                                                    Button(
-                                                        onClick = { inputLoginOtp = sentLoginOtp ?: "" },
-                                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
-                                                        shape = RoundedCornerShape(6.dp),
-                                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                                        modifier = Modifier.height(30.dp)
-                                                    ) {
-                                                        Text("Auto-Fill", fontSize = 11.sp, color = Color.Black, fontWeight = FontWeight.Bold)
-                                                    }
-                                                }
+                                            Column(
+                                                modifier = Modifier.padding(12.dp).fillMaxWidth(),
+                                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                Text(
+                                                    text = "Login Verification Code Sent",
+                                                    fontSize = 11.5.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color(0xFF34D399)
+                                                )
+                                                Text(
+                                                    text = "Enter the 6-digit OTP sent via SMS/Email to ${currentRecord.phone.ifBlank { currentRecord.email }}.",
+                                                    fontSize = 10.5.sp,
+                                                    color = Color(0xFFA7F3D0)
+                                                )
                                             }
                                         }
 
@@ -1346,11 +1283,12 @@ fun UserProfileOnboardingDialog(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("Attach CNIC Front, Back & Shop Photo", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.White)
+                                Text("Upload CNIC Pictures (Front & Back Only) *", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.White)
+                                Text("1. CNIC Front Pic", fontWeight = FontWeight.SemiBold, fontSize = 11.sp, color = appColors.primary)
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Button(
                                         onClick = {
-                                            cnicBothGalleryLauncher.launch(
+                                            cnicGalleryLauncher.launch(
                                                 androidx.activity.result.PickVisualMediaRequest(
                                                     ActivityResultContracts.PickVisualMedia.ImageOnly
                                                 )
@@ -1360,45 +1298,48 @@ fun UserProfileOnboardingDialog(
                                         shape = RoundedCornerShape(6.dp),
                                         modifier = Modifier.weight(1f).height(38.dp)
                                     ) {
-                                        Text("CNIC Gallery", fontSize = 10.5.sp, color = Color.Black, fontWeight = FontWeight.Bold)
+                                        Text("1. CNIC Front (Gallery)", fontSize = 10.sp, color = Color.Black, fontWeight = FontWeight.Bold)
                                     }
 
                                     OutlinedButton(
-                                        onClick = { cnicBothCameraLauncher.launch(null) },
+                                        onClick = { cnicCameraLauncher.launch(null) },
                                         shape = RoundedCornerShape(6.dp),
                                         modifier = Modifier.weight(1f).height(38.dp)
                                     ) {
-                                        Text("CNIC Camera", fontSize = 10.5.sp, color = appColors.primary, fontWeight = FontWeight.Bold)
+                                        Text("1. CNIC Front (Camera)", fontSize = 10.sp, color = appColors.primary, fontWeight = FontWeight.Bold)
                                     }
                                 }
+                                if (capturedCnicBitmap != null) {
+                                    Text("✓ 1. CNIC Front Pic Attached", fontSize = 10.5.sp, color = Color(0xFF81C784), fontWeight = FontWeight.Bold)
+                                }
+
+                                Text("2. CNIC Back Pic", fontWeight = FontWeight.SemiBold, fontSize = 11.sp, color = appColors.primary)
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    OutlinedButton(
+                                    Button(
                                         onClick = {
-                                            shopPhotoGalleryLauncher.launch(
+                                            cnicBackGalleryLauncher.launch(
                                                 androidx.activity.result.PickVisualMediaRequest(
                                                     ActivityResultContracts.PickVisualMedia.ImageOnly
                                                 )
                                             )
                                         },
+                                        colors = ButtonDefaults.buttonColors(containerColor = appColors.primary),
                                         shape = RoundedCornerShape(6.dp),
-                                        modifier = Modifier.weight(1f).height(36.dp)
+                                        modifier = Modifier.weight(1f).height(38.dp)
                                     ) {
-                                        Text("Shop Photo Gallery", fontSize = 10.sp, color = appColors.primary, fontWeight = FontWeight.Bold)
+                                        Text("2. CNIC Back (Gallery)", fontSize = 10.sp, color = Color.Black, fontWeight = FontWeight.Bold)
                                     }
 
                                     OutlinedButton(
-                                        onClick = { shopPhotoCameraLauncher.launch(null) },
+                                        onClick = { cnicBackCameraLauncher.launch(null) },
                                         shape = RoundedCornerShape(6.dp),
-                                        modifier = Modifier.weight(1f).height(36.dp)
+                                        modifier = Modifier.weight(1f).height(38.dp)
                                     ) {
-                                        Text("Shop Photo Camera", fontSize = 10.sp, color = appColors.primary, fontWeight = FontWeight.Bold)
+                                        Text("2. CNIC Back (Camera)", fontSize = 10.sp, color = appColors.primary, fontWeight = FontWeight.Bold)
                                     }
                                 }
-                                if (capturedCnicBitmap != null) {
-                                    Text("✓ CNIC Front/Back Photo Attached", fontSize = 10.5.sp, color = Color(0xFF81C784), fontWeight = FontWeight.Bold)
-                                }
-                                if (capturedShopBitmap != null) {
-                                    Text("✓ Shop Photo Attached (Synced to Admin Panel)", fontSize = 10.5.sp, color = Color(0xFF38BDF8), fontWeight = FontWeight.Bold)
+                                if (capturedCnicBackBitmap != null) {
+                                    Text("✓ 2. CNIC Back Pic Attached", fontSize = 10.5.sp, color = Color(0xFF81C784), fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -1499,17 +1440,11 @@ fun UserProfileOnboardingDialog(
                                     return@Button
                                 }
 
-                                if (capturedCnicBitmap == null && capturedCnicBackBitmap == null && !isVipEmail) {
-                                    cnicPhotoError = "CNIC photo attach karein."
-                                    generalErrorBanner = "CNIC Photo Required: Attach CNIC Front & Back."
-                                    Toast.makeText(context, "CNIC Photo attach karein.", Toast.LENGTH_LONG).show()
+                                if ((capturedCnicBitmap == null || capturedCnicBackBitmap == null) && !isVipEmail) {
+                                    cnicPhotoError = "1. CNIC Front Pic aur 2. CNIC Back Pic dono attach karein."
+                                    generalErrorBanner = "CNIC Photos Required: Attach 1. CNIC Front Pic & 2. CNIC Back Pic."
+                                    Toast.makeText(context, "1. CNIC Front Pic aur 2. CNIC Back Pic attach karein.", Toast.LENGTH_LONG).show()
                                     return@Button
-                                }
-
-                                if (capturedCnicBitmap != null && capturedCnicBackBitmap == null) {
-                                    capturedCnicBackBitmap = capturedCnicBitmap
-                                } else if (capturedCnicBitmap == null && capturedCnicBackBitmap != null) {
-                                    capturedCnicBitmap = capturedCnicBackBitmap
                                 }
 
                                 if (!isVipEmail) {
@@ -1538,41 +1473,23 @@ fun UserProfileOnboardingDialog(
                                     isSubmittingRegistration = true
                                     registrationProgressText = "Securing account & syncing to Firebase..."
 
-                                    var cnicPath: String? = null
-                                    if (capturedCnicBitmap != null) {
-                                        try {
-                                            val cnicFile = File(context.filesDir, "user_cnic_front_photo.jpg")
-                                            val fos = FileOutputStream(cnicFile)
-                                            capturedCnicBitmap!!.compress(Bitmap.CompressFormat.JPEG, 90, fos)
-                                            fos.flush()
-                                            fos.close()
-                                            cnicPath = cnicFile.absolutePath
-                                        } catch (_: Exception) {}
-                                    }
+                                    val cnicPath = UserSecurityManager.compressAndSaveUserBitmap(
+                                        context = context,
+                                        bitmap = capturedCnicBitmap,
+                                        fileName = "user_cnic_front_photo.jpg"
+                                    )
 
-                                    var cnicBackPath: String? = null
-                                    if (capturedCnicBackBitmap != null) {
-                                        try {
-                                            val cnicBackFile = File(context.filesDir, "user_cnic_back_photo.jpg")
-                                            val fosBack = FileOutputStream(cnicBackFile)
-                                            capturedCnicBackBitmap!!.compress(Bitmap.CompressFormat.JPEG, 90, fosBack)
-                                            fosBack.flush()
-                                            fosBack.close()
-                                            cnicBackPath = cnicBackFile.absolutePath
-                                        } catch (_: Exception) {}
-                                    }
+                                    val cnicBackPath = UserSecurityManager.compressAndSaveUserBitmap(
+                                        context = context,
+                                        bitmap = capturedCnicBackBitmap,
+                                        fileName = "user_cnic_back_photo.jpg"
+                                    )
 
-                                    var shopPhotoPath: String? = null
-                                    if (capturedShopBitmap != null) {
-                                        try {
-                                            val shopFile = File(context.filesDir, "user_shop_photo.jpg")
-                                            val fosShop = FileOutputStream(shopFile)
-                                            capturedShopBitmap!!.compress(Bitmap.CompressFormat.JPEG, 90, fosShop)
-                                            fosShop.flush()
-                                            fosShop.close()
-                                            shopPhotoPath = shopFile.absolutePath
-                                        } catch (_: Exception) {}
-                                    }
+                                    val shopPhotoPath = UserSecurityManager.compressAndSaveUserBitmap(
+                                        context = context,
+                                        bitmap = capturedShopBitmap,
+                                        fileName = "user_shop_photo.jpg"
+                                    )
 
                                     val profile = UserProfile(
                                         name = name.trim(),

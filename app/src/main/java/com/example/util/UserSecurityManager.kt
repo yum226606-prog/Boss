@@ -52,12 +52,49 @@ class UserSecurityManager(private val context: Context) {
         private const val KEY_LAST_SYSTEM_TIME = "key_last_system_time"
         private const val KEY_TAMPER_FLAG = "key_tamper_flag"
         private const val KEY_LOCK_REASON = "key_lock_reason"
+        private const val KEY_SUBSCRIPTION_TIER = "key_subscription_tier"
         private const val KEY_LAST_APP_ACTIVE_TIME = "key_last_app_active_time"
         private const val KEY_USER_CNIC_PHOTO = "key_user_cnic_photo"
         private const val KEY_USER_CNIC_BACK_PHOTO = "key_user_cnic_back_photo"
         private const val KEY_USER_SHOP_PHOTO = "key_user_shop_photo"
         private const val KEY_USER_IP = "key_user_ip"
         private const val KEY_FIREBASE_SMS_PURCHASED = "key_firebase_sms_purchased"
+
+        /**
+         * Compresses and scales bitmap to max 600px dimension and JPEG 60% quality.
+         * Protects device internal storage from bloating/quota crashes with try/catch.
+         */
+        fun compressAndSaveUserBitmap(context: Context, bitmap: android.graphics.Bitmap?, fileName: String): String? {
+            if (bitmap == null) return null
+            return try {
+                val maxDim = 600
+                val origW = bitmap.width
+                val origH = bitmap.height
+                val scaled = if (origW > maxDim || origH > maxDim) {
+                    val ratio = origW.toFloat() / origH.toFloat()
+                    val (newW, newH) = if (ratio > 1f) {
+                        maxDim to (maxDim / ratio).toInt().coerceAtLeast(1)
+                    } else {
+                        (maxDim * ratio).toInt().coerceAtLeast(1) to maxDim
+                    }
+                    android.graphics.Bitmap.createScaledBitmap(bitmap, newW, newH, true)
+                } else {
+                    bitmap
+                }
+                val file = java.io.File(context.filesDir, fileName)
+                java.io.FileOutputStream(file).use { fos ->
+                    scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 60, fos)
+                    fos.flush()
+                }
+                if (scaled != bitmap) {
+                    scaled.recycle()
+                }
+                file.absolutePath
+            } catch (e: Exception) {
+                android.util.Log.e("UserSecurityManager", "Failed to compress/save user bitmap: ${e.message}")
+                null
+            }
+        }
     }
 
     fun getDeviceId(): String = identityManager.getPersistentDeviceId()
@@ -233,6 +270,18 @@ class UserSecurityManager(private val context: Context) {
         val lastKnown = prefs.getLong(KEY_LAST_SYSTEM_TIME, now)
         var tampered = prefs.getBoolean(KEY_TAMPER_FLAG, false)
         val lockReason = prefs.getString(KEY_LOCK_REASON, null)
+        val tierStr = prefs.getString(KEY_SUBSCRIPTION_TIER, SubscriptionTier.ONE_MONTH.name) ?: SubscriptionTier.ONE_MONTH.name
+        val parsedTier = SubscriptionTier.entries.firstOrNull {
+            it.name.equals(tierStr, ignoreCase = true) ||
+                it.code.equals(tierStr, ignoreCase = true) ||
+                it.title.equals(tierStr, ignoreCase = true)
+        } ?: when {
+            tierStr.contains("LIFETIME", ignoreCase = true) -> SubscriptionTier.LIFETIME_VIP
+            tierStr.contains("YEAR", ignoreCase = true) || tierStr.contains("12", ignoreCase = true) || tierStr.contains("1Y", ignoreCase = true) -> SubscriptionTier.ONE_YEAR
+            tierStr.contains("6", ignoreCase = true) -> SubscriptionTier.SIX_MONTHS
+            tierStr.contains("3", ignoreCase = true) -> SubscriptionTier.THREE_MONTHS
+            else -> SubscriptionTier.ONE_MONTH
+        }
 
         if (now < (lastKnown - 3600000L)) {
             tampered = true
@@ -249,7 +298,8 @@ class UserSecurityManager(private val context: Context) {
             lastPaymentProofPath = proofPath,
             lastKnownSystemTime = now,
             isClockTampered = tampered,
-            lockReason = lockReason
+            lockReason = lockReason,
+            tier = parsedTier
         )
     }
 
@@ -354,20 +404,25 @@ class UserSecurityManager(private val context: Context) {
         isBlocked: Boolean,
         blockReason: String?,
         trialStartTime: Long,
-        activatedUntil: Long
+        activatedUntil: Long,
+        tierName: String? = null
     ) {
         prefs.edit().apply {
-            putBoolean(KEY_IS_ACTIVATED, isActivated || isLifetimeFree)
-            if (isLifetimeFree) {
+            val effectiveActive = (isActivated || isLifetimeFree) && !isBlocked
+            putBoolean(KEY_IS_ACTIVATED, effectiveActive)
+            if (!tierName.isNullOrBlank()) {
+                putString(KEY_SUBSCRIPTION_TIER, tierName.trim())
+            } else if (isLifetimeFree) {
+                putString(KEY_SUBSCRIPTION_TIER, SubscriptionTier.LIFETIME_VIP.name)
+            }
+            if (isBlocked) {
+                putString(KEY_LOCK_REASON, blockReason ?: "Account blocked by Administrator.")
+            } else if (isLifetimeFree) {
                 putLong(KEY_ACTIVATED_UNTIL, 0L)
                 remove(KEY_LOCK_REASON)
             } else {
-                if (activatedUntil > 0L) putLong(KEY_ACTIVATED_UNTIL, activatedUntil)
-                if (isBlocked) {
-                    putString(KEY_LOCK_REASON, blockReason ?: "Account blocked by Administrator.")
-                } else {
-                    remove(KEY_LOCK_REASON)
-                }
+                if (activatedUntil >= 0L) putLong(KEY_ACTIVATED_UNTIL, activatedUntil)
+                remove(KEY_LOCK_REASON)
             }
             if (trialStartTime > 0L) {
                 putLong(KEY_TRIAL_START, trialStartTime)

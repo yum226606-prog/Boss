@@ -11,6 +11,7 @@ import com.example.model.FSectionFormula
 import com.example.model.FormulaCategorySettings
 import com.example.model.GlassFormula
 import com.example.model.MasterEngineCloudConfig
+import com.example.model.RemoteLayoutConfig
 import com.example.model.SlidingDoorFormulaSettings
 import com.example.model.WindowFormulaSettings
 import kotlinx.coroutines.CoroutineScope
@@ -24,6 +25,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -112,26 +114,15 @@ class BossMasterEngineManager(private val context: Context) {
             while (isActive) {
                 if (SupabaseCloudManager.isSupabaseConfigured(context)) {
                     try {
-                        // Always sync SMS/Email gateway config from app_configs even before user login
-                        syncGatewayConfigOnlyFromSupabase()
-                    } catch (_: Exception) {}
-                }
-                if (!isVerifiedAndSubscribedProvider()) {
-                    clearRuntimeFormulas()
-                    delay(10_000L)
-                    continue
-                }
-                if (SupabaseCloudManager.isSupabaseConfigured(context)) {
-                    try {
-                        val row = fetchMasterConfigRowFromSupabase()
-                        if (row != null) {
-                            val parsed = parseJsonConfig(row)
-                            if (parsed != null) {
-                                _cloudConfig.value = parsed
-                                _isConnectedToCloud.value = true
-                                withContext(Dispatchers.Main) {
-                                    onConfigApplied(parsed)
-                                }
+                        val parsed = withTimeoutOrNull(3000L) {
+                            val row = fetchMasterConfigRowFromSupabase()
+                            if (row != null) parseJsonConfig(row) else null
+                        }
+                        if (parsed != null) {
+                            _cloudConfig.value = parsed
+                            _isConnectedToCloud.value = true
+                            withContext(Dispatchers.Main) {
+                                onConfigApplied(parsed)
                             }
                         }
                     } catch (e: Exception) {
@@ -141,7 +132,7 @@ class BossMasterEngineManager(private val context: Context) {
                 } else {
                     _isConnectedToCloud.value = false
                 }
-                delay(20_000L)
+                delay(15_000L)
             }
         }
     }
@@ -235,15 +226,88 @@ class BossMasterEngineManager(private val context: Context) {
         editor.apply()
     }
 
+    private fun unwrapRowPayload(row: JSONObject): JSONObject {
+        val valueObj = row.optJSONObject("value")
+            ?: row.optJSONObject("config")
+            ?: row.optJSONObject("data")
+            ?: row.optJSONObject("config_json")
+        if (valueObj != null) return valueObj
+
+        val rawStr = row.optString("value", "")
+            .ifBlank { row.optString("config_json", "") }
+            .ifBlank { row.optString("data", "") }
+            .ifBlank { row.optString("config", "") }
+        if (rawStr.isNotBlank() && rawStr.trim().startsWith("{")) {
+            return try { JSONObject(rawStr) } catch (_: Exception) { row }
+        }
+        return row
+    }
+
+    private fun unwrapRowArrayPayload(row: JSONObject): JSONArray? {
+        val arrObj = row.optJSONArray("value")
+            ?: row.optJSONArray("config")
+            ?: row.optJSONArray("data")
+            ?: row.optJSONArray("config_json")
+        if (arrObj != null) return arrObj
+
+        val rawStr = row.optString("value", "")
+            .ifBlank { row.optString("config_json", "") }
+            .ifBlank { row.optString("data", "") }
+            .ifBlank { row.optString("config", "") }
+        if (rawStr.isNotBlank() && rawStr.trim().startsWith("[")) {
+            return try { JSONArray(rawStr) } catch (_: Exception) { null }
+        }
+        return null
+    }
+
     private suspend fun fetchMasterConfigRowFromSupabase(): JSONObject? {
-        // 1. Primary: table `app_configs`, key = `master_engine_config`
+        // 1. Direct select=* from `app_configs` (/rest/v1/app_configs?select=*)
+        val allRows = SupabaseCloudManager.fetchAllTableRows(SUPABASE_APP_CONFIGS_TABLE)
+        if (allRows.isNotEmpty()) {
+            val merged = JSONObject()
+            // Merge non-master rows first, then specific v1 keys and master_engine_config row last
+            val sortedRows = allRows.sortedBy { r ->
+                val k = r.optString("key", r.optString("config_key", r.optString("id", ""))).trim()
+                when {
+                    k.equals(SUPABASE_MASTER_KEY, ignoreCase = true) -> 2
+                    k.endsWith("_v1", ignoreCase = true) -> 1
+                    else -> 0
+                }
+            }
+            sortedRows.forEach { r ->
+                extractAndSaveSmsGatewayConfigFromRow(r)
+                val rowKey = r.optString("key", r.optString("config_key", r.optString("id", ""))).trim()
+                val arrPayload = unwrapRowArrayPayload(r)
+                if (arrPayload != null) {
+                    if (rowKey.isNotEmpty()) {
+                        merged.put(rowKey, arrPayload)
+                    }
+                } else {
+                    val inner = unwrapRowPayload(r)
+                    if (rowKey.isNotEmpty() && inner !== r) {
+                        merged.put(rowKey, inner)
+                    }
+                    val keys = inner.keys()
+                    while (keys.hasNext()) {
+                        val k = keys.next()
+                        if (k != "key" && k != "config_key" && k != "id" && k != "created_at" && k != "updated_at") {
+                            merged.put(k, inner.opt(k))
+                        }
+                    }
+                }
+            }
+            if (merged.length() > 0) {
+                return merged
+            }
+        }
+
+        // 2. Fallback individual row lookups
         SupabaseCloudManager.fetchMasterTableRow(
             table = SUPABASE_APP_CONFIGS_TABLE,
             keyColumn = "key",
             keyValue = SUPABASE_MASTER_KEY
         )?.let { return it }
 
-        // 2. Alternate column names on `app_configs`
         SupabaseCloudManager.fetchMasterTableRow(
             table = SUPABASE_APP_CONFIGS_TABLE,
             keyColumn = "config_key",
@@ -256,7 +320,6 @@ class BossMasterEngineManager(private val context: Context) {
             keyValue = SUPABASE_MASTER_KEY
         )?.let { return it }
 
-        // 2b. Also check `global_config` key on `app_configs`
         SupabaseCloudManager.fetchMasterTableRow(
             table = SUPABASE_APP_CONFIGS_TABLE,
             keyColumn = "key",
@@ -280,20 +343,12 @@ class BossMasterEngineManager(private val context: Context) {
 
     suspend fun fetchLatestFromCloud(isVerifiedAndSubscribed: Boolean = true): MasterEngineCloudConfig? = withContext(Dispatchers.IO) {
         SupabaseCloudManager.initContext(context)
-        if (SupabaseCloudManager.isSupabaseConfigured(context)) {
-            try {
-                syncGatewayConfigOnlyFromSupabase()
-            } catch (_: Exception) {}
-        }
-        if (!isVerifiedAndSubscribed) {
-            clearRuntimeFormulas()
-            return@withContext null
-        }
-        SupabaseCloudManager.initContext(context)
         if (!SupabaseCloudManager.isSupabaseConfigured(context)) return@withContext null
         try {
-            val row = fetchMasterConfigRowFromSupabase() ?: return@withContext null
-            val parsed = parseJsonConfig(row)
+            val parsed = withTimeoutOrNull(3000L) {
+                val row = fetchMasterConfigRowFromSupabase() ?: return@withTimeoutOrNull null
+                parseJsonConfig(row)
+            }
             if (parsed != null) {
                 _cloudConfig.value = parsed
                 _isConnectedToCloud.value = true
@@ -311,14 +366,14 @@ class BossMasterEngineManager(private val context: Context) {
             ?: row.optJSONObject("config")
             ?: row.optJSONObject("data")
             ?: row.optJSONObject("config_json")
-        if (valueObj != null) {
+        if (valueObj != null && !row.has("layout_config_v1") && !row.has("custom_sections_v1") && !row.has("aluminium_rates_v1") && !row.has("formulas_v1")) {
             val jsonStr = valueObj.toString()
             return deserializeFromJson(jsonStr)?.also { saveCachedConfigJson(jsonStr) }
         }
         val rawStr = row.optString("value", "")
             .ifBlank { row.optString("config_json", "") }
             .ifBlank { row.optString("data", "") }
-        if (rawStr.isNotBlank() && rawStr.trim().startsWith("{")) {
+        if (rawStr.isNotBlank() && rawStr.trim().startsWith("{") && !row.has("layout_config_v1") && !row.has("custom_sections_v1")) {
             return deserializeFromJson(rawStr)?.also { saveCachedConfigJson(rawStr) }
         }
         val rowStr = row.toString()
@@ -329,35 +384,197 @@ class BossMasterEngineManager(private val context: Context) {
         return try {
             val root = JSONObject(jsonStr)
             extractAndSaveSmsGatewayConfig(root)
+
+            val layoutV1Obj = root.optJSONObject("layout_config_v1")
+                ?: root.optJSONObject("layoutConfig")
+                ?: root.optJSONObject("layout_config")
+            val customSecsV1Obj = root.optJSONObject("custom_sections_v1")
+            val blueprintsV1Obj = root.optJSONObject("blueprints_v1")
+            val ratesV1Obj = root.optJSONObject("aluminium_rates_v1")
+            val formulasV1Obj = root.optJSONObject("formulas_v1")
+            val brandingV1Obj = root.optJSONObject("company_branding_v1")
+
             val customSections = mutableListOf<DynamicMasterSection>()
-            root.optJSONArray("customSections")?.let { arr ->
+            val seenSectionCodes = mutableSetOf<String>()
+
+            fun parseSectionArray(arr: JSONArray?) {
+                if (arr == null) return
                 for (i in 0 until arr.length()) {
-                    val o = arr.optJSONObject(i) ?: continue
-                    val code = o.optString("code", "").trim()
-                    if (code.isNotEmpty()) {
-                        customSections.add(
-                            DynamicMasterSection(
-                                id = o.optString("id", code),
-                                category = o.optString("category", "Windows"),
-                                code = code,
-                                title = o.optString("title", code),
-                                defaultGauge = o.optString("defaultGauge", "1.6"),
-                                defaultColor = o.optString("defaultColor", "DULL"),
-                                defaultRate = o.optDouble("defaultRate", 650.0),
-                                weightPerFoot = o.optDouble("weightPerFoot", 0.45),
-                                isActive = o.optBoolean("isActive", true)
+                    val o = arr.optJSONObject(i)
+                    if (o != null) {
+                        val code = o.optString("code", o.optString("section", o.optString("name", ""))).trim()
+                        if (code.isNotEmpty() && seenSectionCodes.add(code.uppercase())) {
+                            customSections.add(
+                                DynamicMasterSection(
+                                    id = o.optString("id", code),
+                                    category = o.optString("category", "Windows"),
+                                    code = code,
+                                    title = o.optString("title", o.optString("label", code)),
+                                    defaultGauge = o.optString("defaultGauge", o.optString("gauge", "1.6")),
+                                    defaultColor = o.optString("defaultColor", o.optString("color", "DULL")),
+                                    defaultRate = o.optDouble("defaultRate", o.optDouble("rate", 650.0)),
+                                    weightPerFoot = o.optDouble("weightPerFoot", 0.45),
+                                    isActive = o.optBoolean("isActive", !o.optBoolean("hidden", false))
+                                )
                             )
-                        )
+                        }
+                    } else {
+                        val strSec = arr.optString(i, "").trim()
+                        if (strSec.isNotEmpty() && seenSectionCodes.add(strSec.uppercase())) {
+                            customSections.add(
+                                DynamicMasterSection(
+                                    id = strSec,
+                                    code = strSec,
+                                    title = strSec
+                                )
+                            )
+                        }
                     }
                 }
             }
 
-            val rateOverrides = mutableMapOf<String, Double>()
-            root.optJSONObject("rateOverrides")?.let { jo ->
-                jo.keys().forEach { k -> rateOverrides[k] = jo.optDouble(k, 0.0) }
+            parseSectionArray(root.optJSONArray("custom_sections_v1"))
+            parseSectionArray(customSecsV1Obj?.optJSONArray("customSections"))
+            parseSectionArray(customSecsV1Obj?.optJSONArray("custom_sections"))
+            parseSectionArray(customSecsV1Obj?.optJSONArray("dynamicSections"))
+            parseSectionArray(customSecsV1Obj?.optJSONArray("dynamic_sections"))
+            parseSectionArray(customSecsV1Obj?.optJSONArray("sections"))
+            parseSectionArray(layoutV1Obj?.optJSONArray("customSections"))
+            parseSectionArray(layoutV1Obj?.optJSONArray("custom_sections"))
+            parseSectionArray(layoutV1Obj?.optJSONArray("dynamicSections"))
+            parseSectionArray(layoutV1Obj?.optJSONArray("dynamic_sections"))
+            parseSectionArray(root.optJSONArray("customSections"))
+            parseSectionArray(root.optJSONArray("custom_sections"))
+            parseSectionArray(root.optJSONArray("dynamicSections"))
+            parseSectionArray(root.optJSONArray("dynamic_sections"))
+
+            val sourcesForSets = listOfNotNull(root, layoutV1Obj, customSecsV1Obj, ratesV1Obj)
+
+            fun parseStringSet(vararg keys: String): Set<String> {
+                val result = mutableSetOf<String>()
+                for (src in sourcesForSets) {
+                    for (k in keys) {
+                        val arr = src.optJSONArray(k)
+                        if (arr != null) {
+                            for (i in 0 until arr.length()) {
+                                val s = arr.optString(i, "").trim()
+                                if (s.isNotEmpty()) result.add(s)
+                            }
+                        } else {
+                            val raw = src.optString(k, "").trim()
+                            if (raw.isNotEmpty() && !raw.startsWith("[") && !raw.startsWith("{")) {
+                                raw.split("|", ",").map { it.trim() }.filter { it.isNotEmpty() }.forEach { result.add(it) }
+                            }
+                        }
+                    }
+                }
+                return result
             }
 
-            val parsedRates = root.optJSONObject("rates")?.let { ratesObj ->
+            fun parseStringList(vararg keys: String): List<String>? {
+                val set = parseStringSet(*keys)
+                return set.toList().takeIf { it.isNotEmpty() }
+            }
+
+            val hiddenSections = parseStringSet("hiddenSections", "hidden_sections")
+            val deletedSections = parseStringSet("deletedSections", "deleted_sections")
+            val availableGauges = parseStringList("availableGauges", "available_gauges")
+            val availableColors = parseStringList("availableColors", "available_colors")
+            val availableGlassGauges = parseStringList("availableGlassGauges", "available_glass_gauges")
+            val availableGlassColors5mm = parseStringList("availableGlassColors5mm", "available_glass_colors_5mm")
+            val availableGlassColors8mm = parseStringList("availableGlassColors8mm", "available_glass_colors_8mm")
+
+            val layoutObj = layoutV1Obj
+                ?: root.optJSONObject("themeConfig")
+                ?: root.optJSONObject("theme_config")
+            val layoutPreset = layoutObj?.optString("preset", "")?.ifBlank { null }
+                ?: layoutObj?.optString("themePreset", "")?.ifBlank { null }
+                ?: root.optString("themePreset", "").ifBlank { null }
+            val layoutTabPosition = layoutObj?.optString("tabPosition", "")?.ifBlank { null }
+                ?: root.optString("tabPosition", "").ifBlank { null }
+            val layoutButtonStyle = layoutObj?.optString("buttonStyle", "")?.ifBlank { null }
+                ?: root.optString("buttonStyle", "").ifBlank { null }
+            val layoutFontWeightMode = layoutObj?.optString("fontWeightMode", "")?.ifBlank { null }
+                ?: root.optString("fontWeightMode", "").ifBlank { null }
+
+            // Parse RemoteLayoutConfig from layout_config_v1 / layoutObj / root
+            val enabledTabsSet = mutableSetOf<String>()
+            val enabledTabsSources = listOfNotNull(layoutV1Obj, root)
+            for (src in enabledTabsSources) {
+                val tabsArr = src.optJSONArray("enabledTabs")
+                    ?: src.optJSONArray("enabled_tabs")
+                    ?: src.optJSONArray("visibleTabs")
+                    ?: src.optJSONArray("activeTabs")
+                if (tabsArr != null) {
+                    for (i in 0 until tabsArr.length()) {
+                        val t = tabsArr.optString(i, "").trim()
+                        if (t.isNotEmpty()) enabledTabsSet.add(t)
+                    }
+                    if (enabledTabsSet.isNotEmpty()) break
+                }
+                val tabsObj = src.optJSONObject("enabledTabs") ?: src.optJSONObject("enabled_tabs")
+                if (tabsObj != null) {
+                    val keys = tabsObj.keys()
+                    while (keys.hasNext()) {
+                        val k = keys.next()
+                        if (tabsObj.optBoolean(k, true)) enabledTabsSet.add(k.trim())
+                    }
+                    if (enabledTabsSet.isNotEmpty()) break
+                }
+            }
+
+            val tabCustomTitlesMap = mutableMapOf<String, String>()
+            for (src in enabledTabsSources) {
+                val titlesObj = src.optJSONObject("tabCustomTitles")
+                    ?: src.optJSONObject("tab_custom_titles")
+                    ?: src.optJSONObject("customTabTitles")
+                    ?: src.optJSONObject("tabTitles")
+                if (titlesObj != null) {
+                    val keys = titlesObj.keys()
+                    while (keys.hasNext()) {
+                        val k = keys.next()
+                        val v = titlesObj.optString(k, "").trim()
+                        if (v.isNotEmpty()) {
+                            tabCustomTitlesMap[k.trim()] = v
+                        }
+                    }
+                }
+            }
+
+            fun optBoolConfig(defaultVal: Boolean, vararg keys: String): Boolean {
+                for (src in enabledTabsSources) {
+                    for (k in keys) {
+                        if (src.has(k)) return src.optBoolean(k, defaultVal)
+                    }
+                }
+                return defaultVal
+            }
+
+            val remoteLayoutConfig = RemoteLayoutConfig(
+                enabledTabs = enabledTabsSet,
+                tabCustomTitles = tabCustomTitlesMap,
+                showMasterGaugeSelector = optBoolConfig(true, "showMasterGaugeSelector", "show_master_gauge_selector", "showGaugeSelector"),
+                showMasterColorSelector = optBoolConfig(true, "showMasterColorSelector", "show_master_color_selector", "showColorSelector"),
+                showMasterFrameSelector = optBoolConfig(true, "showMasterFrameSelector", "show_master_frame_selector", "showFrameSelector"),
+                showMasterGlassSelector = optBoolConfig(true, "showMasterGlassSelector", "show_master_glass_selector", "showGlassSelector"),
+                showThemeStudioButton = optBoolConfig(true, "showThemeStudioButton", "show_theme_studio_button", "showThemeButton"),
+                showDoneQuotationButton = optBoolConfig(true, "showDoneQuotationButton", "show_done_quotation_button", "showDoneButton"),
+                showCompareCFButton = optBoolConfig(true, "showCompareCFButton", "show_compare_cf_button", "showCvsFButton", "showCompareCfButton"),
+                showDiscountRow = optBoolConfig(true, "showDiscountRow", "show_discount_row", "showAlumDiscountRow"),
+                showHardwareRow = optBoolConfig(true, "showHardwareRow", "show_hardware_row"),
+                showTransportRow = optBoolConfig(true, "showTransportRow", "show_transport_row"),
+                showLabourRow = optBoolConfig(true, "showLabourRow", "show_labour_row")
+            )
+
+            val rateOverrides = mutableMapOf<String, Double>()
+            listOfNotNull(ratesV1Obj, root).forEach { src ->
+                src.optJSONObject("rateOverrides")?.let { jo ->
+                    jo.keys().forEach { k -> rateOverrides[k] = jo.optDouble(k, 0.0) }
+                }
+            }
+
+            fun parseRatesMapObject(ratesObj: JSONObject?): Map<String, Map<String, Map<String, Double>>>? {
+                if (ratesObj == null) return null
                 val gaugeMap = mutableMapOf<String, Map<String, Map<String, Double>>>()
                 ratesObj.keys().forEach { gaugeKey ->
                     val colObj = ratesObj.optJSONObject(gaugeKey) ?: return@forEach
@@ -373,10 +590,16 @@ class BossMasterEngineManager(private val context: Context) {
                     }
                     if (colMap.isNotEmpty()) gaugeMap[gaugeKey] = colMap
                 }
-                gaugeMap.takeIf { it.isNotEmpty() }
+                return gaugeMap.takeIf { it.isNotEmpty() }
             }
 
-            val parsedGlassRates = root.optJSONObject("glassRates")?.let { grObj ->
+            val parsedRates = parseRatesMapObject(root.optJSONObject("rates"))
+                ?: parseRatesMapObject(ratesV1Obj?.optJSONObject("rates"))
+                ?: parseRatesMapObject(ratesV1Obj?.optJSONObject("aluminiumRates"))
+                ?: parseRatesMapObject(ratesV1Obj)
+
+            fun parseGlassRatesObject(grObj: JSONObject?): Map<String, Map<String, Double>>? {
+                if (grObj == null) return null
                 val gMap = mutableMapOf<String, Map<String, Double>>()
                 grObj.keys().forEach { gaugeKey ->
                     val colObj = grObj.optJSONObject(gaugeKey) ?: return@forEach
@@ -387,90 +610,137 @@ class BossMasterEngineManager(private val context: Context) {
                     }
                     if (colMap.isNotEmpty()) gMap[gaugeKey] = colMap
                 }
-                gMap.takeIf { it.isNotEmpty() }
+                return gMap.takeIf { it.isNotEmpty() }
             }
 
+            val parsedGlassRates = parseGlassRatesObject(root.optJSONObject("glassRates"))
+                ?: parseGlassRatesObject(ratesV1Obj?.optJSONObject("glassRates"))
+                ?: parseGlassRatesObject(root.optJSONObject("glass_rates"))
+                ?: parseGlassRatesObject(ratesV1Obj?.optJSONObject("glass_rates"))
+
             val formulaAdjustments = mutableMapOf<String, Double>()
-            root.optJSONObject("formulaAdjustments")?.let { jo ->
-                jo.keys().forEach { k -> formulaAdjustments[k] = jo.optDouble(k, 0.0) }
+            listOfNotNull(formulasV1Obj, root).forEach { src ->
+                src.optJSONObject("formulaAdjustments")?.let { jo ->
+                    jo.keys().forEach { k -> formulaAdjustments[k] = jo.optDouble(k, 0.0) }
+                }
+            }
+
+            fun findFormulaObj(vararg keys: String): JSONObject? {
+                for (src in listOfNotNull(formulasV1Obj, root)) {
+                    for (k in keys) {
+                        val obj = src.optJSONObject(k)
+                        if (obj != null) return obj
+                    }
+                }
+                return null
             }
 
             // Parse structured WindowFormulaSettings if present (support singular & plural keys)
-            val winObj = root.optJSONObject("winFormulas")
-                ?: root.optJSONObject("windowFormulas")
-                ?: root.optJSONObject("windowFormula")
+            val winObj = findFormulaObj("winFormulas", "windowFormulas", "windowFormula")
             val winFormulas = if (winObj != null) {
                 BossSerializationHelper.deserializeWindowFormulas(winObj.toString(), WindowFormulaSettings())
             } else null
 
             // Parse structured SlidingDoorFormulaSettings if present (support singular & plural keys)
-            val sdObj = root.optJSONObject("slidingDoorFormulas")
-                ?: root.optJSONObject("slidingDoorFormula")
+            val sdObj = findFormulaObj("slidingDoorFormulas", "slidingDoorFormula")
             val slidingDoorFormulas = if (sdObj != null) {
                 BossSerializationHelper.deserializeSlidingDoorFormulas(sdObj.toString(), SlidingDoorFormulaSettings())
             } else null
 
-            val doorObj = root.optJSONObject("doorFormulas")
-                ?: root.optJSONObject("doorFormula")
+            val doorObj = findFormulaObj("doorFormulas", "doorFormula")
             val doorFormulas = if (doorObj != null) {
                 BossSerializationHelper.deserializeCategoryFormulas(doorObj.toString(), FormulaCategorySettings())
             } else null
 
-            val fixObj = root.optJSONObject("fixFormulas")
-                ?: root.optJSONObject("fixFormula")
+            val fixObj = findFormulaObj("fixFormulas", "fixFormula")
             val fixFormulas = if (fixObj != null) {
                 BossSerializationHelper.deserializeCategoryFormulas(fixObj.toString(), FormulaCategorySettings())
             } else null
 
-            val opWinObj = root.optJSONObject("openableWinFormulas")
-                ?: root.optJSONObject("opwinFormulas")
-                ?: root.optJSONObject("openwinFormula")
+            val opWinObj = findFormulaObj(
+                "openableWinFormulas",
+                "opwinFormulas",
+                "openwinFormula",
+                "openableWindowFormulas",
+                "openableWindowFormula"
+            )
             val openableWinFormulas = if (opWinObj != null) {
                 BossSerializationHelper.deserializeCategoryFormulas(opWinObj.toString(), FormulaCategorySettings.defaultOpenableWindowSettings())
             } else null
 
-            val fSecObj = root.optJSONObject("fSectionFormula")
+            val fSecObj = findFormulaObj("fSectionFormula", "fSectionFormulas", "f_section_formula")
             val fSectionFormula = if (fSecObj != null) {
                 BossSerializationHelper.deserializeFSectionFormula(fSecObj.toString(), FSectionFormula())
             } else null
 
-            val glassObj = root.optJSONObject("glassFormulas")
+            val glassObj = findFormulaObj("glassFormulas", "glassFormula", "glass_formulas")
             val glassFormulas = if (glassObj != null) {
                 BossSerializationHelper.deserializeGlassFormulas(glassObj.toString(), emptyMap())
             } else null
 
             val blueprints = mutableListOf<DragDropBlueprint>()
-            (root.optJSONArray("dragDropBlueprints") ?: root.optJSONArray("blueprints"))?.let { arr ->
+            val seenBlueprintIds = mutableSetOf<String>()
+            fun parseBlueprintArray(arr: JSONArray?) {
+                if (arr == null) return
                 for (i in 0 until arr.length()) {
                     val b = arr.optJSONObject(i) ?: continue
-                    val id = b.optString("id", "bp_$i")
+                    val id = b.optString("id", "bp_$i").trim()
+                    if (!seenBlueprintIds.add(id)) continue
                     val label = b.optString("label", b.optString("name", b.optString("title", id)))
+                    val widthInches = b.optDouble("widthInches", b.optDouble("defaultWidthInches", b.optDouble("width", -1.0)))
+                    val heightInches = b.optDouble("heightInches", b.optDouble("defaultHeightInches", b.optDouble("height", -1.0)))
+                    val widthFt = if (b.has("widthFt")) b.optDouble("widthFt", 4.0)
+                    else if (widthInches > 0) (if (widthInches > 20.0) widthInches / 12.0 else widthInches)
+                    else 4.0
+                    val heightFt = if (b.has("heightFt")) b.optDouble("heightFt", 4.0)
+                    else if (heightInches > 0) (if (heightInches > 20.0) heightInches / 12.0 else heightInches)
+                    else 4.0
+
                     blueprints.add(
                         DragDropBlueprint(
                             id = id,
                             label = label,
-                            widthFt = b.optDouble("widthFt", b.optDouble("defaultWidthInches", 48.0) / 12.0),
-                            heightFt = b.optDouble("heightFt", b.optDouble("defaultHeightInches", 48.0) / 12.0),
-                            panels = b.optInt("panels", b.optInt("cols", 2)).coerceAtLeast(1),
+                            widthFt = widthFt,
+                            heightFt = heightFt,
+                            panels = b.optInt("panels", b.optInt("panelCount", b.optInt("cols", 2))).coerceAtLeast(1),
                             hasBottomFixed = b.optBoolean("hasBottomFixed", false),
-                            category = b.optString("category", "Sliding Window")
+                            category = b.optString("category", b.optString("type", "Sliding Window"))
                         )
                     )
                 }
             }
 
-            val mainLogoBase64 = root.optString("mainLogoBase64", "")
-                .ifBlank { root.optString("goldenLionLogoBase64", "") }
-                .ifBlank { root.optString("logoBase64", "") }
+            parseBlueprintArray(root.optJSONArray("blueprints_v1"))
+            parseBlueprintArray(blueprintsV1Obj?.optJSONArray("blueprints"))
+            parseBlueprintArray(blueprintsV1Obj?.optJSONArray("dragDropBlueprints"))
+            parseBlueprintArray(blueprintsV1Obj?.optJSONArray("items"))
+            parseBlueprintArray(layoutV1Obj?.optJSONArray("dragDropBlueprints"))
+            parseBlueprintArray(layoutV1Obj?.optJSONArray("blueprints"))
+            parseBlueprintArray(root.optJSONArray("dragDropBlueprints"))
+            parseBlueprintArray(root.optJSONArray("blueprints"))
 
-            val quotationLetterheadBase64 = root.optString("quotationLetterheadBase64", "")
-                .ifBlank { root.optString("letterheadBackgroundBase64", "") }
-                .ifBlank { root.optString("quotationBackgroundBase64", "") }
+            fun optBrandingStr(vararg keys: String): String {
+                for (src in listOfNotNull(brandingV1Obj, root)) {
+                    for (k in keys) {
+                        val v = src.optString(k, "").trim()
+                        if (v.isNotEmpty()) return v
+                    }
+                }
+                return ""
+            }
+
+            val mainLogoBase64 = optBrandingStr("mainLogoBase64", "goldenLionLogoBase64", "logoBase64", "companyLogoBase64", "logo")
+            val quotationLetterheadBase64 = optBrandingStr("quotationLetterheadBase64", "letterheadBackgroundBase64", "quotationBackgroundBase64", "letterheadBase64")
+            val companyName = optBrandingStr("companyName", "company_name", "shopName", "businessName").ifBlank { null }
+            val companyTagline = optBrandingStr("companyTagline", "company_tagline", "tagline").ifBlank { null }
+            val companyPhone = optBrandingStr("companyPhone", "company_phone", "phone").ifBlank { null }
+            val companyAddress = optBrandingStr("companyAddress", "company_address", "address").ifBlank { null }
+            val quotationTerms = optBrandingStr("quotationTerms", "quotation_terms", "terms").ifBlank { null }
 
             val clearRateListCommand = root.optBoolean("clearRateListCommand", root.optBoolean("clearRateList", false))
             val clearRateListTimestamp = root.optLong("clearRateListTimestamp", root.optLong("clearRateListEpochMs", 0L))
 
-            val bannerObj = root.optJSONObject("activeBanner")
+            val bannerObj = root.optJSONObject("activeBanner") ?: brandingV1Obj?.optJSONObject("activeBanner")
             val banner = if (bannerObj != null) {
                 AppOfferBanner(
                     id = bannerObj.optString("id", "cloud_banner"),
@@ -486,6 +756,18 @@ class BossMasterEngineManager(private val context: Context) {
                 version = root.optLong("version", 1L),
                 publishedBy = root.optString("publishedBy", "Syed Saboor Nawab (Master)"),
                 customSections = customSections,
+                hiddenSections = hiddenSections,
+                deletedSections = deletedSections,
+                availableGauges = availableGauges,
+                availableColors = availableColors,
+                availableGlassGauges = availableGlassGauges,
+                availableGlassColors5mm = availableGlassColors5mm,
+                availableGlassColors8mm = availableGlassColors8mm,
+                layoutPreset = layoutPreset,
+                layoutTabPosition = layoutTabPosition,
+                layoutButtonStyle = layoutButtonStyle,
+                layoutFontWeightMode = layoutFontWeightMode,
+                remoteLayoutConfig = remoteLayoutConfig,
                 rateOverrides = rateOverrides,
                 rates = parsedRates,
                 glassRates = parsedGlassRates,
@@ -498,6 +780,11 @@ class BossMasterEngineManager(private val context: Context) {
                 fSectionFormula = fSectionFormula,
                 glassFormulas = glassFormulas,
                 dragDropBlueprints = blueprints,
+                companyName = companyName,
+                companyTagline = companyTagline,
+                companyPhone = companyPhone,
+                companyAddress = companyAddress,
+                quotationTerms = quotationTerms,
                 mainLogoBase64 = mainLogoBase64,
                 quotationLetterheadBase64 = quotationLetterheadBase64,
                 clearRateListCommand = clearRateListCommand,

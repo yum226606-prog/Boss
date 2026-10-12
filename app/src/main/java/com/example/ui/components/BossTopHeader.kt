@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.model.BossDefaultRates
+import com.example.model.RemoteLayoutConfig
 import com.example.ui.screens.AddCustomSectionDialog
 import com.example.ui.theme.*
 
@@ -52,6 +53,7 @@ fun BossTopHeader(
     customLogoPath: String? = null,
     companyName: String? = null,
     companyTagline: String? = null,
+    remoteLayoutConfig: RemoteLayoutConfig = RemoteLayoutConfig(),
     isVipOwner: Boolean = false,
     onLogoClick: () -> Unit = {},
     onSettingsClick: () -> Unit = {},
@@ -188,43 +190,47 @@ fun BossTopHeader(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
-                    Button(
-                        onClick = onDoneClick,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = c.primary,
-                            contentColor = Color(0xFF161208)
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                        modifier = Modifier.height(30.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.CheckCircle,
-                            contentDescription = null,
-                            modifier = Modifier.size(13.dp)
-                        )
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Text(
-                            text = "Done",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 11.sp
-                        )
+                    if (remoteLayoutConfig.showDoneQuotationButton) {
+                        Button(
+                            onClick = onDoneClick,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = c.primary,
+                                contentColor = Color(0xFF161208)
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                            modifier = Modifier.height(30.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                text = "Done",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp
+                            )
+                        }
                     }
 
-                    IconButton(
-                        onClick = onThemeClick,
-                        modifier = Modifier
-                            .size(30.dp)
-                            .clip(CircleShape)
-                            .background(c.panel2)
-                            .border(1.dp, c.primary.copy(alpha = 0.7f), CircleShape)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Palette,
-                            contentDescription = "Themes & Studio",
-                            tint = c.primary,
-                            modifier = Modifier.size(15.dp)
-                        )
+                    if (remoteLayoutConfig.showThemeStudioButton) {
+                        IconButton(
+                            onClick = onThemeClick,
+                            modifier = Modifier
+                                .size(30.dp)
+                                .clip(CircleShape)
+                                .background(c.panel2)
+                                .border(1.dp, c.primary.copy(alpha = 0.7f), CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Palette,
+                                contentDescription = "Themes & Studio",
+                                tint = c.primary,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
                     }
 
                     IconButton(
@@ -278,7 +284,8 @@ fun BossTopHeader(
                 val displayGlass = if (ctxGlassMode == "OFF") "OFF" else "${ctxGlassGauge}m $shortGlassColor"
 
                 // 1. Gauge chip
-                Box(modifier = Modifier.weight(1f)) {
+                if (remoteLayoutConfig.showMasterGaugeSelector) {
+                    Box(modifier = Modifier.weight(1f)) {
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -369,10 +376,12 @@ fun BossTopHeader(
                             }
                         )
                     }
+                    }
                 }
 
                 // 2. Color chip
-                Box(modifier = Modifier.weight(1f)) {
+                if (remoteLayoutConfig.showMasterColorSelector) {
+                    Box(modifier = Modifier.weight(1f)) {
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -455,10 +464,12 @@ fun BossTopHeader(
                             }
                         )
                     }
+                    }
                 }
 
                 // 3. Frame Type Chip
-                Box(modifier = Modifier.weight(1f)) {
+                if (remoteLayoutConfig.showMasterFrameSelector) {
+                    Box(modifier = Modifier.weight(1f)) {
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -565,10 +576,12 @@ fun BossTopHeader(
                             }
                         )
                     }
+                    }
                 }
 
                 // 4. Glass Dropdown selector
-                Box(modifier = Modifier.weight(1f)) {
+                if (remoteLayoutConfig.showMasterGlassSelector) {
+                    Box(modifier = Modifier.weight(1f)) {
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -707,6 +720,7 @@ fun BossTopHeader(
                                 showAddGlassGaugeDialog = true
                             }
                         )
+                    }
                     }
                 }
             }

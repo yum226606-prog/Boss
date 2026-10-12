@@ -288,7 +288,7 @@ object QuotationPdfGenerator {
         canvas.drawText("Rs. ${quote.alumTotal.toInt()}", 488f, curY + 13f, boldPaint)
         curY += 20f
 
-        if (quote.discountPct > 0.0) {
+        if (state.remoteLayoutConfig.showDiscountRow && quote.discountPct > 0.0) {
             boldPaint.textSize = 9.5f
             boldPaint.color = Color.parseColor("#047857")
             canvas.drawText("Aluminium Discount (-${quote.discountPct}%):", 180f, curY + 12f, boldPaint)
@@ -374,14 +374,21 @@ object QuotationPdfGenerator {
 
         textPaint.textSize = 9.5f
         textPaint.color = Color.parseColor("#1F2937")
-        canvas.drawText("Hardware & Accessories:", 48f, curY + 18f, textPaint)
-        canvas.drawText("Rs. ${quote.hardwareTotal.toInt()}", 205f, curY + 18f, boldPaint)
-
-        canvas.drawText("Labour & Fabrication:", 48f, curY + 35f, textPaint)
-        canvas.drawText("Rs. ${quote.labourCost.toInt()}", 205f, curY + 35f, boldPaint)
-
-        canvas.drawText("Transport & Rent:", 48f, curY + 52f, textPaint)
-        canvas.drawText("Rs. ${quote.transportRent.toInt()}", 205f, curY + 52f, boldPaint)
+        var summaryRowOffset = 18f
+        if (state.remoteLayoutConfig.showHardwareRow) {
+            canvas.drawText("Hardware & Accessories:", 48f, curY + summaryRowOffset, textPaint)
+            canvas.drawText("Rs. ${quote.hardwareTotal.toInt()}", 205f, curY + summaryRowOffset, boldPaint)
+            summaryRowOffset += 17f
+        }
+        if (state.remoteLayoutConfig.showLabourRow) {
+            canvas.drawText("Labour & Fabrication:", 48f, curY + summaryRowOffset, textPaint)
+            canvas.drawText("Rs. ${quote.labourCost.toInt()}", 205f, curY + summaryRowOffset, boldPaint)
+            summaryRowOffset += 17f
+        }
+        if (state.remoteLayoutConfig.showTransportRow) {
+            canvas.drawText("Transport & Rent:", 48f, curY + summaryRowOffset, textPaint)
+            canvas.drawText("Rs. ${quote.transportRent.toInt()}", 205f, curY + summaryRowOffset, boldPaint)
+        }
 
         val grandTotalRect = RectF(310f, curY + 10f, 545f, curY + 58f)
         paint.style = Paint.Style.FILL

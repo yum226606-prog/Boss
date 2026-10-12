@@ -23,6 +23,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.model.RemoteLayoutConfig
 import com.example.model.TabBarPosition
 import com.example.model.ThemeConfig
 import com.example.ui.components.*
@@ -151,6 +152,7 @@ fun BossCalculatorApp(viewModel: BossAppViewModel) {
                             customLogoPath = state.customLogoPath,
                             companyName = state.companyName,
                             companyTagline = state.companyTagline,
+                            remoteLayoutConfig = state.remoteLayoutConfig,
                             isVipOwner = state.userProfile.isVipOwner,
                             onLogoClick = {
                                 showRoundLogoDialog = true
@@ -202,7 +204,8 @@ fun BossCalculatorApp(viewModel: BossAppViewModel) {
                             ClientHorizontalTabBar(
                                 activeTab = state.activeTab,
                                 onTabSelected = { viewModel.selectTab(it) },
-                                theme = theme
+                                theme = theme,
+                                remoteLayoutConfig = state.remoteLayoutConfig
                             )
                         }
                     }
@@ -212,7 +215,8 @@ fun BossCalculatorApp(viewModel: BossAppViewModel) {
                         ClientHorizontalTabBar(
                             activeTab = state.activeTab,
                             onTabSelected = { viewModel.selectTab(it) },
-                            theme = theme
+                            theme = theme,
+                            remoteLayoutConfig = state.remoteLayoutConfig
                         )
                     }
                 }
@@ -242,7 +246,8 @@ fun BossCalculatorApp(viewModel: BossAppViewModel) {
                             ClientVerticalTabBar(
                                 activeTab = state.activeTab,
                                 onTabSelected = { viewModel.selectTab(it) },
-                                theme = theme
+                                theme = theme,
+                                remoteLayoutConfig = state.remoteLayoutConfig
                             )
                         }
 
@@ -269,7 +274,8 @@ fun BossCalculatorApp(viewModel: BossAppViewModel) {
                             ClientVerticalTabBar(
                                 activeTab = state.activeTab,
                                 onTabSelected = { viewModel.selectTab(it) },
-                                theme = theme
+                                theme = theme,
+                                remoteLayoutConfig = state.remoteLayoutConfig
                             )
                         }
                     }
@@ -443,9 +449,13 @@ private fun RoundLogoExtractDialog(
 private fun ClientHorizontalTabBar(
     activeTab: ClientTab,
     onTabSelected: (ClientTab) -> Unit,
-    theme: ThemeConfig
+    theme: ThemeConfig,
+    remoteLayoutConfig: RemoteLayoutConfig = RemoteLayoutConfig()
 ) {
     val c = currentBossColors()
+    val visibleTabs = ClientTab.values().filter { tab ->
+        remoteLayoutConfig.isClientTabEnabled(tab.name, tab.title)
+    }
     Surface(
         color = c.panel,
         shadowElevation = 2.dp,
@@ -458,9 +468,9 @@ private fun ClientHorizontalTabBar(
                 .padding(horizontal = 6.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            ClientTab.values().forEach { tab ->
+            visibleTabs.forEach { tab ->
                 CustomTabItem(
-                    title = tab.title,
+                    title = remoteLayoutConfig.getTabTitle(tab.name, tab.title),
                     icon = iconForClientTab(tab),
                     isSelected = activeTab == tab,
                     onClick = { onTabSelected(tab) },
@@ -476,9 +486,13 @@ private fun ClientHorizontalTabBar(
 private fun ClientVerticalTabBar(
     activeTab: ClientTab,
     onTabSelected: (ClientTab) -> Unit,
-    theme: ThemeConfig
+    theme: ThemeConfig,
+    remoteLayoutConfig: RemoteLayoutConfig = RemoteLayoutConfig()
 ) {
     val c = currentBossColors()
+    val visibleTabs = ClientTab.values().filter { tab ->
+        remoteLayoutConfig.isClientTabEnabled(tab.name, tab.title)
+    }
     Surface(
         color = c.panel,
         shadowElevation = 2.dp,
@@ -494,9 +508,9 @@ private fun ClientVerticalTabBar(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            ClientTab.values().forEach { tab ->
+            visibleTabs.forEach { tab ->
                 CustomTabItem(
-                    title = tab.title,
+                    title = remoteLayoutConfig.getTabTitle(tab.name, tab.title),
                     icon = iconForClientTab(tab),
                     isSelected = activeTab == tab,
                     onClick = { onTabSelected(tab) },

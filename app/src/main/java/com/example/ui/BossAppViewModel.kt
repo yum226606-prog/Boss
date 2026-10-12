@@ -107,6 +107,7 @@ data class BossAppState(
     val customLogoPath: String? = null,
     val customBackgroundPath: String? = null,
     val dragDropBlueprints: List<DragDropBlueprint> = emptyList(),
+    val remoteLayoutConfig: RemoteLayoutConfig = RemoteLayoutConfig(),
     val userProfile: UserProfile = UserProfile(),
     val subscriptionState: SubscriptionState = SubscriptionState(),
     val savedQuotations: List<SavedQuotation> = emptyList(),
@@ -317,48 +318,80 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
                 .apply()
             masterEngineManager.clearRuntimeFormulas()
         }
-        val canUseCachedFormulas = profile.isRegistered && !isLocked
+        val canUseCachedFormulas = !isLocked
         val cachedCloud = if (canUseCachedFormulas) masterEngineManager.cloudConfig.value else null
+
+        // Apply cached cloud rates & glassRates directly if available
+        cachedCloud?.rates?.forEach { (g, colMap) ->
+            val targetG = baseRates.getOrPut(g) { mutableMapOf() }
+            colMap.forEach { (col, secMap) ->
+                val targetCol = targetG.getOrPut(col) { mutableMapOf() }
+                secMap.forEach { (sec, r) ->
+                    if (r >= 0.0) targetCol[sec] = r
+                }
+            }
+        }
+        if (cachedCloud != null && cachedCloud.rateOverrides.isNotEmpty()) {
+            applyRateOverridesToMap(baseRates, cachedCloud.rateOverrides)
+        }
+        cachedCloud?.glassRates?.forEach { (g, colMap) ->
+            val targetG = initialGlassRates.getOrPut(g) { emptyMap() }.toMutableMap()
+            colMap.forEach { (col, r) ->
+                if (r >= 0.0) targetG[col] = r
+            }
+            initialGlassRates[g] = targetG.toMap()
+        }
+        val effectiveDeletedSecs = savedDeletedSecs + (cachedCloud?.deletedSections ?: emptySet())
+        val effectiveHiddenSecs = cachedCloud?.hiddenSections ?: emptySet()
+        if (effectiveDeletedSecs.isNotEmpty() || effectiveHiddenSecs.isNotEmpty()) {
+            val allHiddenUpper = (effectiveDeletedSecs + effectiveHiddenSecs).map { it.trim().uppercase() }.toSet()
+            baseRates.forEach { (_, colorMap) ->
+                colorMap.forEach { (_, secMap) ->
+                    secMap.keys.removeAll { k -> allHiddenUpper.contains(k.trim().uppercase()) }
+                }
+            }
+        }
+
         val restoredWinFormulas = if (canUseCachedFormulas) {
-            BossSerializationHelper.deserializeWindowFormulas(
+            cachedCloud?.winFormulas ?: BossSerializationHelper.deserializeWindowFormulas(
                 decodeBase64Pref("win_formulas_b64"),
-                cachedCloud?.winFormulas ?: WindowFormulaSettings()
+                WindowFormulaSettings()
             )
         } else WindowFormulaSettings()
         val restoredSdFormulas = if (canUseCachedFormulas) {
-            BossSerializationHelper.deserializeSlidingDoorFormulas(
+            cachedCloud?.slidingDoorFormulas ?: BossSerializationHelper.deserializeSlidingDoorFormulas(
                 decodeBase64Pref("sliding_door_formulas_b64"),
-                cachedCloud?.slidingDoorFormulas ?: SlidingDoorFormulaSettings()
+                SlidingDoorFormulaSettings()
             )
         } else SlidingDoorFormulaSettings()
         val restoredDoorFormulas = if (canUseCachedFormulas) {
-            BossSerializationHelper.deserializeCategoryFormulas(
+            cachedCloud?.doorFormulas ?: BossSerializationHelper.deserializeCategoryFormulas(
                 decodeBase64Pref("door_formulas_b64"),
-                cachedCloud?.doorFormulas ?: FormulaCategorySettings()
+                FormulaCategorySettings()
             )
         } else FormulaCategorySettings()
         val restoredFixFormulas = if (canUseCachedFormulas) {
-            BossSerializationHelper.deserializeCategoryFormulas(
+            cachedCloud?.fixFormulas ?: BossSerializationHelper.deserializeCategoryFormulas(
                 decodeBase64Pref("fix_formulas_b64"),
-                cachedCloud?.fixFormulas ?: FormulaCategorySettings()
+                FormulaCategorySettings()
             )
         } else FormulaCategorySettings()
         val restoredOpwinFormulas = if (canUseCachedFormulas) {
-            BossSerializationHelper.deserializeCategoryFormulas(
+            cachedCloud?.openableWinFormulas ?: BossSerializationHelper.deserializeCategoryFormulas(
                 decodeBase64Pref("opwin_formulas_b64"),
-                cachedCloud?.openableWinFormulas ?: FormulaCategorySettings.defaultOpenableWindowSettings()
+                FormulaCategorySettings.defaultOpenableWindowSettings()
             )
         } else FormulaCategorySettings.defaultOpenableWindowSettings()
         val restoredFSectionFormula = if (canUseCachedFormulas) {
-            BossSerializationHelper.deserializeFSectionFormula(
+            cachedCloud?.fSectionFormula ?: BossSerializationHelper.deserializeFSectionFormula(
                 decodeBase64Pref("f_section_formula_b64"),
-                cachedCloud?.fSectionFormula ?: FSectionFormula()
+                FSectionFormula()
             )
         } else FSectionFormula()
         val restoredGlassFormulas = if (canUseCachedFormulas) {
-            BossSerializationHelper.deserializeGlassFormulas(
+            cachedCloud?.glassFormulas?.takeIf { it.isNotEmpty() } ?: BossSerializationHelper.deserializeGlassFormulas(
                 decodeBase64Pref("glass_formulas_b64"),
-                cachedCloud?.glassFormulas ?: defaultGlassFormulas
+                defaultGlassFormulas
             )
         } else defaultGlassFormulas
 
@@ -382,10 +415,21 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
             customBackgroundDim = prefs.getFloat("theme_custom_bg_dim", baseThemeConfig.customBackgroundDim)
         )
 
-        val defaultCompanyName = prefs.getString("company_name", null)
+        val defaultCompanyName = cachedCloud?.companyName?.takeIf { it.isNotBlank() }
+            ?: prefs.getString("company_name", null)
             ?: if (profile.isVipOwner) "BOSS ALUMINIUM & GLASS" else profile.shopAddress.ifBlank { "YOUR SHOP / BUSINESS NAME" }
-        val defaultTagline = prefs.getString("company_tagline", null)
+        val defaultTagline = cachedCloud?.companyTagline?.takeIf { it.isNotBlank() }
+            ?: prefs.getString("company_tagline", null)
             ?: if (profile.isVipOwner) "STRONGER | SMARTER | BETTER" else "Aluminium & Glass Fabrication Works"
+        val defaultPhone = cachedCloud?.companyPhone?.takeIf { it.isNotBlank() }
+            ?: prefs.getString("company_phone", profile.phone) ?: profile.phone
+        val defaultAddress = cachedCloud?.companyAddress?.takeIf { it.isNotBlank() }
+            ?: prefs.getString("company_address", profile.shopAddress) ?: profile.shopAddress
+        val defaultTerms = cachedCloud?.quotationTerms?.takeIf { it.isNotBlank() }
+            ?: prefs.getString(
+                "quotation_terms",
+                "1. 50% Advance payment required to start work.\n2. Balance 50% upon material delivery.\n3. Quotation valid for 7 days only."
+            ) ?: "1. 50% Advance payment required to start work.\n2. Balance 50% upon material delivery.\n3. Quotation valid for 7 days only."
 
         return BossAppState(
             ctxGauge = prefs.getString("ctx_gauge", "1.6") ?: "1.6",
@@ -400,14 +444,17 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
             letterheadMode = prefs.getBoolean("letterhead_mode", true),
             quotationBgOpacity = prefs.getFloat("quotation_bg_opacity", 0.92f),
             quotationLogoWatermarkOpacity = prefs.getFloat("quotation_watermark_opacity", 0.28f),
-            availableGauges = initialGauges,
-            availableColors = initialColors,
-            availableGlassGauges = initialGlassGauges,
-            availableGlassColors5mm = initialGlassColorsByGauge["5"] ?: initialGlass5,
-            availableGlassColors8mm = initialGlassColorsByGauge["8"] ?: initialGlass8,
+            availableGauges = cachedCloud?.availableGauges?.takeIf { it.isNotEmpty() } ?: initialGauges,
+            availableColors = cachedCloud?.availableColors?.takeIf { it.isNotEmpty() } ?: initialColors,
+            availableGlassGauges = cachedCloud?.availableGlassGauges?.takeIf { it.isNotEmpty() } ?: initialGlassGauges,
+            availableGlassColors5mm = cachedCloud?.availableGlassColors5mm?.takeIf { it.isNotEmpty() } ?: (initialGlassColorsByGauge["5"] ?: initialGlass5),
+            availableGlassColors8mm = cachedCloud?.availableGlassColors8mm?.takeIf { it.isNotEmpty() } ?: (initialGlassColorsByGauge["8"] ?: initialGlass8),
             availableGlassColorsByGauge = initialGlassColorsByGauge.toMap(),
-            customSections = mergedCustomSections,
-            deletedSections = savedDeletedSecs,
+            customSections = mergedCustomSections.filterNot {
+                effectiveDeletedSecs.contains(it) || effectiveHiddenSecs.contains(it)
+            },
+            deletedSections = effectiveDeletedSecs,
+            hiddenSections = effectiveHiddenSecs,
             rates = baseRates,
             glassRates = initialGlassRates,
             winFormulas = restoredWinFormulas,
@@ -428,17 +475,16 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
             taxPercent = 0.0,
             transportRent = prefs.getFloat("transport_rent", 0f).toDouble(),
             labourCost = prefs.getFloat("labour_cost", 0f).toDouble(),
-            quotationTerms = prefs.getString(
-                "quotation_terms",
-                "1. 50% Advance payment required to start work.\n2. Balance 50% upon material delivery.\n3. Quotation valid for 7 days only."
-            ) ?: "1. 50% Advance payment required to start work.\n2. Balance 50% upon material delivery.\n3. Quotation valid for 7 days only.",
+            quotationTerms = defaultTerms,
             companyName = defaultCompanyName,
             companyTagline = defaultTagline,
-            companyPhone = prefs.getString("company_phone", profile.phone) ?: profile.phone,
-            companyAddress = prefs.getString("company_address", profile.shopAddress) ?: profile.shopAddress,
+            companyPhone = defaultPhone,
+            companyAddress = defaultAddress,
             companyNtn = prefs.getString("company_ntn", "") ?: "",
             customLogoPath = prefs.getString("custom_logo_path", null),
             customBackgroundPath = prefs.getString("custom_background_path", null),
+            dragDropBlueprints = cachedCloud?.dragDropBlueprints ?: emptyList(),
+            remoteLayoutConfig = cachedCloud?.remoteLayoutConfig ?: RemoteLayoutConfig(),
             userProfile = profile,
             subscriptionState = sub,
             savedQuotations = savedQuotes,
@@ -508,9 +554,7 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
 
     fun isUserVerifiedAndSubscribed(): Boolean {
         val s = _state.value
-        val prof = s.userProfile
-        val sub = s.subscriptionState
-        return prof.isRegistered && !sub.isAppLocked(prof)
+        return !s.subscriptionState.isAppLocked(s.userProfile)
     }
 
     fun verifyUserSecurityWithServerNow(force: Boolean = false) {
@@ -523,7 +567,7 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
         FirebaseCloudManager.verifyUserSecurityOnServer(
             context = getApplication(),
             profile = prof
-        ) { serverTimeMs, isDeviceMismatch, isBlocked, blockReason, isActivated, isLifetime, expiryMs ->
+        ) { serverTimeMs, isDeviceMismatch, isBlocked, blockReason, isActivated, isLifetime, expiryMs, tierName ->
             val localNow = System.currentTimeMillis()
             val clockTampered = (localNow < serverTimeMs - 10L * 60L * 1000L) && !prof.isVipOwner
             val currentSub = _state.value.subscriptionState
@@ -537,7 +581,8 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
                 isBlocked = isBlocked || isDeviceMismatch,
                 blockReason = blockReason,
                 trialStartTime = currentSub.trialStartTime,
-                activatedUntil = if (isLifetime) 0L else effectiveExpiry
+                activatedUntil = if (isLifetime) 0L else effectiveExpiry,
+                tierName = tierName
             )
 
             val refreshedSub = securityManager.loadSubscriptionState().copy(
@@ -591,14 +636,15 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
                 phone = currentProfile.phone,
                 cnic = currentProfile.cnic,
                 email = currentProfile.email,
-                onAccountStateChanged = { isActivated, isLifetimeFree, isBlocked, blockReason, trialStart, activatedUntil ->
+                onAccountStateChanged = { isActivated, isLifetimeFree, isBlocked, blockReason, trialStart, activatedUntil, tierName ->
                     securityManager.applyRemoteSubscriptionUpdate(
                         isActivated = isActivated,
                         isLifetimeFree = isLifetimeFree,
                         isBlocked = isBlocked,
                         blockReason = blockReason,
                         trialStartTime = trialStart,
-                        activatedUntil = activatedUntil
+                        activatedUntil = activatedUntil,
+                        tierName = tierName
                     )
                     _state.update {
                         it.copy(
@@ -670,9 +716,6 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
             resetAllFormulasToDefault()
             return
         }
-        if (!currentProf.isRegistered) {
-            return
-        }
 
         val lastClearTs = prefs.getLong("last_admin_clear_rate_ts", 0L)
         if (cloudConfig.clearRateListCommand || (cloudConfig.clearRateListTimestamp > 0L && cloudConfig.clearRateListTimestamp > lastClearTs)) {
@@ -680,6 +723,19 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
                 prefs.edit().putLong("last_admin_clear_rate_ts", cloudConfig.clearRateListTimestamp).apply()
             }
             clearAllRateListData()
+        }
+
+        // Clear any local custom rate keys when Server/Admin Panel pushes rates so Server rates are 100% final
+        if (!cloudConfig.rates.isNullOrEmpty() || cloudConfig.rateOverrides.isNotEmpty()) {
+            val existingKeys = prefs.getStringSet("user_custom_rate_keys", emptySet()) ?: emptySet()
+            val editor = prefs.edit()
+            existingKeys.forEach { k ->
+                val parts = k.split("|")
+                if (parts.size == 3) {
+                    editor.remove("user_sec_rate_${parts[0]}_${parts[1]}_${parts[2]}")
+                }
+            }
+            editor.remove("user_custom_rate_keys").apply()
         }
 
         val adminLogoPath = if (cloudConfig.mainLogoBase64.isNotBlank()) {
@@ -719,40 +775,37 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
                     updatedRates.forEach { (g, colorMap) ->
                         val ratio = (g.toDoubleOrNull() ?: 1.2) / (dyn.defaultGauge.toDoubleOrNull() ?: 1.6).coerceAtLeast(1.0)
                         colorMap.forEach { (_, secMap) ->
-                            secMap[dyn.code] = (dyn.defaultRate * ratio).roundToLong().toDouble()
+                            if (!secMap.containsKey(dyn.code)) {
+                                secMap[dyn.code] = (dyn.defaultRate * ratio).roundToLong().toDouble()
+                            }
                         }
                     }
                 }
             }
 
+            val mergedDeleted = if (cloudConfig.deletedSections.isNotEmpty()) {
+                cur.deletedSections + cloudConfig.deletedSections
+            } else cur.deletedSections
+            val mergedHidden = cloudConfig.hiddenSections
+
+            val allHiddenOrDeletedUpper = (mergedDeleted + mergedHidden).map { it.trim().uppercase() }.toSet()
             val dynCodes = cloudConfig.customSections.filter { it.isActive }.map { it.code }
-            val upperDeleted = cur.deletedSections.map { it.trim().uppercase() }.toSet()
-            val mergedCustomSecs = (cur.customSections + dynCodes).distinct().filterNot {
-                cur.deletedSections.contains(it) || upperDeleted.contains(it.trim().uppercase())
+            val rateSecCodes = updatedRates.values.flatMap { colMap -> colMap.values.flatMap { it.keys } }.distinct()
+            val mergedCustomSecs = (cur.customSections + dynCodes + rateSecCodes).distinct().filterNot {
+                mergedDeleted.contains(it) || mergedHidden.contains(it) || allHiddenOrDeletedUpper.contains(it.trim().uppercase())
             }
-            if (cur.deletedSections.isNotEmpty()) {
+            if (allHiddenOrDeletedUpper.isNotEmpty()) {
                 updatedRates.forEach { (_, colorMap) ->
                     colorMap.forEach { (_, secMap) ->
-                        secMap.keys.removeAll { k -> cur.deletedSections.contains(k) || upperDeleted.contains(k.trim().uppercase()) }
+                        secMap.keys.removeAll { k ->
+                            mergedDeleted.contains(k) || mergedHidden.contains(k) || allHiddenOrDeletedUpper.contains(k.trim().uppercase())
+                        }
                     }
                 }
             }
 
-            // Re-apply user-saved local rate overrides so user defaults are never lost
-            val customRateKeys = prefs.getStringSet("user_custom_rate_keys", emptySet()) ?: emptySet()
-            customRateKeys.forEach { key ->
-                val parts = key.split("|")
-                if (parts.size == 3) {
-                    val g = parts[0]
-                    val col = parts[1]
-                    val sec = parts[2]
-                    val r = prefs.getFloat("user_sec_rate_${g}_${col}_$sec", -1f)
-                    if (r >= 0f && !cur.deletedSections.contains(sec)) {
-                        updatedRates.getOrPut(g) { mutableMapOf() }
-                            .getOrPut(col) { mutableMapOf() }[sec] = r.toDouble()
-                    }
-                }
-            }
+            val rateColorNames = updatedRates.values.flatMap { it.keys }.map { it.trim().uppercase() }.distinct()
+            val mergedAvailableColors = ((cloudConfig.availableColors ?: cur.availableColors) + rateColorNames).distinct()
 
             var updatedWinFormulas = cloudConfig.winFormulas ?: cur.winFormulas
             var updatedSdFormulas = cloudConfig.slidingDoorFormulas ?: cur.slidingDoorFormulas
@@ -760,7 +813,7 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
             val updatedFixFormulas = cloudConfig.fixFormulas ?: cur.fixFormulas
             val updatedOpwinFormulas = cloudConfig.openableWinFormulas ?: cur.opwinFormulas
             var updatedFSectionFormula = cloudConfig.fSectionFormula ?: cur.fSectionFormula
-            val updatedGlassFormulas = cloudConfig.glassFormulas ?: cur.glassFormulas
+            val updatedGlassFormulas = cloudConfig.glassFormulas?.takeIf { it.isNotEmpty() } ?: cur.glassFormulas
 
             val fa = cloudConfig.formulaAdjustments
             if (fa.isNotEmpty()) {
@@ -810,10 +863,49 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
                 glass = updatedGlassFormulas
             )
 
+            var updatedTheme = cur.themeConfig
+            cloudConfig.layoutPreset?.let { pName ->
+                runCatching { ThemePreset.valueOf(pName.uppercase()) }.getOrNull()?.let { p ->
+                    updatedTheme = ThemeConfigEngine.getPresetConfig(p)
+                }
+            }
+            cloudConfig.layoutTabPosition?.let { tp ->
+                runCatching { TabBarPosition.valueOf(tp.uppercase()) }.getOrNull()?.let {
+                    updatedTheme = updatedTheme.copy(tabPosition = it)
+                }
+            }
+            cloudConfig.layoutButtonStyle?.let { bs ->
+                runCatching { ButtonStyleType.valueOf(bs.uppercase()) }.getOrNull()?.let {
+                    updatedTheme = updatedTheme.copy(buttonStyle = it)
+                }
+            }
+            cloudConfig.layoutFontWeightMode?.let { fw ->
+                runCatching { FontWeightMode.valueOf(fw.uppercase()) }.getOrNull()?.let {
+                    updatedTheme = updatedTheme.copy(fontWeightMode = it)
+                }
+            }
+
+            val newLayoutConfig = cloudConfig.remoteLayoutConfig
+            val currentTabStillEnabled = newLayoutConfig.isClientTabEnabled(cur.activeTab.name, cur.activeTab.title) ||
+                cur.activeTab == ClientTab.RATES_AND_SETTINGS
+            val nextActiveTab = if (currentTabStillEnabled) {
+                cur.activeTab
+            } else {
+                ClientTab.entries.firstOrNull { newLayoutConfig.isClientTabEnabled(it.name, it.title) } ?: ClientTab.WINDOWS
+            }
+
             cur.copy(
+                activeTab = nextActiveTab,
                 rates = updatedRates,
                 glassRates = updatedGlassRates,
                 customSections = mergedCustomSecs,
+                deletedSections = mergedDeleted,
+                hiddenSections = mergedHidden,
+                availableGauges = cloudConfig.availableGauges?.takeIf { it.isNotEmpty() } ?: cur.availableGauges,
+                availableColors = mergedAvailableColors.ifEmpty { cur.availableColors },
+                availableGlassGauges = cloudConfig.availableGlassGauges?.takeIf { it.isNotEmpty() } ?: cur.availableGlassGauges,
+                availableGlassColors5mm = cloudConfig.availableGlassColors5mm?.takeIf { it.isNotEmpty() } ?: cur.availableGlassColors5mm,
+                availableGlassColors8mm = cloudConfig.availableGlassColors8mm?.takeIf { it.isNotEmpty() } ?: cur.availableGlassColors8mm,
                 winFormulas = updatedWinFormulas,
                 slidingDoorFormulas = updatedSdFormulas,
                 doorFormulas = updatedDoorFormulas,
@@ -821,10 +913,17 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
                 opwinFormulas = updatedOpwinFormulas,
                 fSectionFormula = updatedFSectionFormula,
                 glassFormulas = updatedGlassFormulas,
-                dragDropBlueprints = if (cloudConfig.dragDropBlueprints.isNotEmpty()) cloudConfig.dragDropBlueprints else cur.dragDropBlueprints,
+                dragDropBlueprints = cloudConfig.dragDropBlueprints,
+                remoteLayoutConfig = newLayoutConfig,
+                companyName = cloudConfig.companyName?.takeIf { it.isNotBlank() } ?: cur.companyName,
+                companyTagline = cloudConfig.companyTagline?.takeIf { it.isNotBlank() } ?: cur.companyTagline,
+                companyPhone = cloudConfig.companyPhone?.takeIf { it.isNotBlank() } ?: cur.companyPhone,
+                companyAddress = cloudConfig.companyAddress?.takeIf { it.isNotBlank() } ?: cur.companyAddress,
+                quotationTerms = cloudConfig.quotationTerms?.takeIf { it.isNotBlank() } ?: cur.quotationTerms,
                 customLogoPath = adminLogoPath ?: cur.customLogoPath,
                 customBackgroundPath = adminLetterheadPath ?: cur.customBackgroundPath,
-                activeOfferBanner = cloudConfig.activeBanner ?: cur.activeOfferBanner
+                activeOfferBanner = cloudConfig.activeBanner ?: cur.activeOfferBanner,
+                themeConfig = updatedTheme
             )
         }
     }
@@ -2186,7 +2285,12 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
             }
         }
 
-        return pieces
+        val blockedSecsUpper = (s.hiddenSections + s.deletedSections).map { it.trim().uppercase() }.toSet()
+        return if (blockedSecsUpper.isEmpty()) {
+            pieces
+        } else {
+            pieces.filterNot { blockedSecsUpper.contains(it.section.trim().uppercase()) }
+        }
     }
 
     fun getGlassCuts(): List<GlassCutResult> {
@@ -2418,7 +2522,8 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
                 rawPieces.add(CutPiece(ex.section, ex.lengthFt * 12.0, ex.qty, "Project Extra", "Extra piece", gauge = g))
             }
         }
-        val allPieces = rawPieces.filter { !s.hiddenSections.contains(it.section) }
+        val blockedSecsUpper = (s.hiddenSections + s.deletedSections).map { it.trim().uppercase() }.toSet()
+        val allPieces = rawPieces.filterNot { blockedSecsUpper.contains(it.section.trim().uppercase()) }
         val grouped = allPieces.groupBy { piece ->
             val effectiveG = if (s.ctxGaugeMode == "ON") {
                 BossCalculationEngine.pricingGaugeForSection(piece.section, s.ctxGauge)
@@ -2462,8 +2567,15 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
         }
 
         val alumTotal = alumRows.sumOf { it.cost }
-        val effectiveDiscountPct = if (s.alumDiscountPercent > 0.0) s.alumDiscountPercent else s.profitPercent.coerceIn(0.0, 100.0)
-        val discountAmt = alumTotal * (effectiveDiscountPct / 100.0)
+        val showDiscount = s.remoteLayoutConfig.showDiscountRow
+        val effectiveDiscountPct = if (!showDiscount) {
+            0.0
+        } else if (s.alumDiscountPercent > 0.0) {
+            s.alumDiscountPercent
+        } else {
+            s.profitPercent.coerceIn(0.0, 100.0)
+        }
+        val discountAmt = if (showDiscount) alumTotal * (effectiveDiscountPct / 100.0) else 0.0
         val netAlum = (alumTotal - discountAmt).coerceAtLeast(0.0)
         val alumWithMarkup = netAlum
 
@@ -2473,7 +2585,7 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
         val sdCount = s.slidingDoors.sumOf { it.qty }
         val totalUnits = winCount + doorCount + fixCount + sdCount
 
-        val hardwareTotal = if (s.autoIncludeHardware) {
+        val hardwareTotal = if (s.remoteLayoutConfig.showHardwareRow && s.autoIncludeHardware) {
             s.windowHardwareRate.coerceAtLeast(0.0)
         } else 0.0
 
@@ -2494,8 +2606,10 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
         }
         val glassTotal = glassLines.sumOf { it.total }
         val customTotal = s.customBillItems.sumOf { it.amount }
+        val effectiveTransport = if (s.remoteLayoutConfig.showTransportRow) s.transportRent else 0.0
+        val effectiveLabour = if (s.remoteLayoutConfig.showLabourRow) s.labourCost else 0.0
         val baseSubTotal = netAlum + glassTotal + hardwareTotal + customTotal
-        val grandTotal = baseSubTotal + s.transportRent + s.labourCost
+        val grandTotal = baseSubTotal + effectiveTransport + effectiveLabour
 
         return QuotationResult(
             aluminiumRows = alumRows,
@@ -2509,8 +2623,8 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
             hardwareTotal = hardwareTotal,
             glassTotal = glassTotal,
             glassLines = glassLines,
-            transportRent = s.transportRent,
-            labourCost = s.labourCost,
+            transportRent = effectiveTransport,
+            labourCost = effectiveLabour,
             grandTotal = grandTotal
         )
     }
@@ -2574,8 +2688,14 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private fun persistSavedQuotations(list: List<SavedQuotation>) {
-        val jsonStr = BossSerializationHelper.serializeSavedQuotations(list)
-        prefs.edit().putString("saved_quotations_json", jsonStr).apply()
+        try {
+            // Cap quotation history to 50 most recent to prevent SharedPreferences quota bloat
+            val cappedList = list.take(50)
+            val jsonStr = BossSerializationHelper.serializeSavedQuotations(cappedList)
+            prefs.edit().putString("saved_quotations_json", jsonStr).apply()
+        } catch (e: Exception) {
+            android.util.Log.e("BossAppViewModel", "Failed to persist saved quotations: ${e.message}")
+        }
     }
 
     override fun onCleared() {

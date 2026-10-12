@@ -86,7 +86,8 @@ fun BillingScreen(
         state.slidingDoorHardwareRate,
         state.customBillItems,
         state.transportRent,
-        state.labourCost
+        state.labourCost,
+        state.remoteLayoutConfig
     ) { viewModel.calculateQuotation() }
 
     var showCvsFDialog by remember { mutableStateOf(false) }
@@ -117,7 +118,8 @@ fun BillingScreen(
 
     // Totals calculation
     val alumSubtotal = quote.alumTotal
-    val discountAmt = alumSubtotal * (state.alumDiscountPercent / 100.0)
+    val showDiscountRow = state.remoteLayoutConfig.showDiscountRow
+    val discountAmt = if (showDiscountRow) alumSubtotal * (state.alumDiscountPercent / 100.0) else 0.0
     val netAlumTotal = (alumSubtotal - discountAmt).coerceAtLeast(0.0)
 
     val winCount = state.windows.sumOf { it.qty } + state.openableWindows.sumOf { it.qty }
@@ -127,15 +129,17 @@ fun BillingScreen(
     val totalFrameItems = winCount + doorCount + fixCount + sdCount
     val defaultHwRatePerItem = state.slidingDoorHardwareRate.takeIf { it > 0 } ?: 3000.0
 
-    val autoHardwareCost = if (state.autoIncludeHardware) {
+    val autoHardwareCost = if (state.remoteLayoutConfig.showHardwareRow && state.autoIncludeHardware) {
         (winCount * state.windowHardwareRate) +
             (doorCount * state.doorHardwareRate) +
             (fixCount * state.fixHardwareRate) +
             (sdCount * state.slidingDoorHardwareRate)
     } else 0.0
 
+    val effectiveLabourCost = if (state.remoteLayoutConfig.showLabourRow) state.labourCost else 0.0
+    val effectiveTransportRent = if (state.remoteLayoutConfig.showTransportRow) state.transportRent else 0.0
     val customItemsTotal = state.customBillItems.sumOf { it.amount }
-    val baseSubTotal = netAlumTotal + quote.glassTotal + autoHardwareCost + customItemsTotal + state.labourCost + state.transportRent
+    val baseSubTotal = netAlumTotal + quote.glassTotal + autoHardwareCost + customItemsTotal + effectiveLabourCost + effectiveTransportRent
     val profitAmt = baseSubTotal * (state.profitPercent / 100.0)
     val grandTotal = baseSubTotal + profitAmt
 
@@ -311,43 +315,45 @@ fun BillingScreen(
                             )
                         }
 
-                        Column(
-                            modifier = Modifier.weight(0.75f),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Text(
-                                text = "Alum Disc (%)",
-                                color = Color(0xFFF5B82E),
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            OutlinedTextField(
-                                value = discountInput,
-                                onValueChange = {
-                                    discountInput = it
-                                    viewModel.updateAlumDiscount(it.toDoubleOrNull() ?: 0.0)
-                                },
-                                placeholder = {
-                                    Text(
-                                        text = "0%",
-                                        color = Color(0xFF64748B),
-                                        fontSize = 11.sp,
-                                        maxLines = 1
-                                    )
-                                },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                singleLine = true,
-                                shape = RoundedCornerShape(8.dp),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedContainerColor = Color(0xFF0E131D),
-                                    unfocusedContainerColor = Color(0xFF0E131D),
-                                    focusedBorderColor = Color(0xFFF5B82E),
-                                    unfocusedBorderColor = Color(0xFF1E293B),
-                                    focusedTextColor = Color(0xFFF5B82E),
-                                    unfocusedTextColor = Color(0xFFF5B82E)
-                                ),
-                                modifier = Modifier.fillMaxWidth()
-                            )
+                        if (showDiscountRow) {
+                            Column(
+                                modifier = Modifier.weight(0.75f),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = "Alum Disc (%)",
+                                    color = Color(0xFFF5B82E),
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                OutlinedTextField(
+                                    value = discountInput,
+                                    onValueChange = {
+                                        discountInput = it
+                                        viewModel.updateAlumDiscount(it.toDoubleOrNull() ?: 0.0)
+                                    },
+                                    placeholder = {
+                                        Text(
+                                            text = "0%",
+                                            color = Color(0xFF64748B),
+                                            fontSize = 11.sp,
+                                            maxLines = 1
+                                        )
+                                    },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedContainerColor = Color(0xFF0E131D),
+                                        unfocusedContainerColor = Color(0xFF0E131D),
+                                        focusedBorderColor = Color(0xFFF5B82E),
+                                        unfocusedBorderColor = Color(0xFF1E293B),
+                                        focusedTextColor = Color(0xFFF5B82E),
+                                        unfocusedTextColor = Color(0xFFF5B82E)
+                                    ),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
                         }
                     }
 
@@ -464,27 +470,29 @@ fun BillingScreen(
                 }
 
                 // 4. C vs F (Dark with Sky Blue border & text -> Opens Frame C vs F Comparison)
-                OutlinedButton(
-                    onClick = { showCvsFDialog = true },
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = Color(0xFF0B0F17),
-                        contentColor = Color(0xFF38BDF8)
-                    ),
-                    border = BorderStroke(1.dp, Color(0xFF38BDF8)),
-                    shape = RoundedCornerShape(10.dp),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
-                    modifier = Modifier
-                        .weight(1.05f)
-                        .height(42.dp)
-                ) {
-                    Icon(
-                        Icons.Default.CompareArrows,
-                        contentDescription = "C vs F",
-                        tint = Color(0xFF38BDF8),
-                        modifier = Modifier.size(15.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("C vs F", color = Color(0xFF38BDF8), fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                if (state.remoteLayoutConfig.showCompareCFButton) {
+                    OutlinedButton(
+                        onClick = { showCvsFDialog = true },
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = Color(0xFF0B0F17),
+                            contentColor = Color(0xFF38BDF8)
+                        ),
+                        border = BorderStroke(1.dp, Color(0xFF38BDF8)),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                        modifier = Modifier
+                            .weight(1.05f)
+                            .height(42.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.CompareArrows,
+                            contentDescription = "C vs F",
+                            tint = Color(0xFF38BDF8),
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("C vs F", color = Color(0xFF38BDF8), fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
 
                 // 5. Share (Square Icon Button)
@@ -937,7 +945,7 @@ fun BillingScreen(
                             }
 
                             if (quote.aluminiumRows.isNotEmpty()) {
-                                if (state.alumDiscountPercent > 0.0) {
+                                if (showDiscountRow && state.alumDiscountPercent > 0.0) {
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -972,7 +980,7 @@ fun BillingScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        text = "Net Aluminium Total",
+                                        text = if (showDiscountRow) "Net Aluminium Total" else "Total Aluminium Amount",
                                         color = accentGoldInk,
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.ExtraBold
@@ -1050,7 +1058,7 @@ fun BillingScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        text = "Total Glass Amount (No Discount)",
+                                        text = "Total Glass Amount",
                                         color = accentBlueInk,
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.ExtraBold
@@ -1065,7 +1073,7 @@ fun BillingScreen(
                             }
                         }
 
-                        if (autoHardwareCost > 0.0) {
+                        if (state.remoteLayoutConfig.showHardwareRow && autoHardwareCost > 0.0) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1088,7 +1096,7 @@ fun BillingScreen(
                             }
                         }
 
-                        if (state.labourCost > 0.0) {
+                        if (state.remoteLayoutConfig.showLabourRow && effectiveLabourCost > 0.0) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1103,7 +1111,7 @@ fun BillingScreen(
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 Text(
-                                    text = "Rs ${"%,d".format(state.labourCost.roundToLong())}",
+                                    text = "Rs ${"%,d".format(effectiveLabourCost.roundToLong())}",
                                     color = primaryInk,
                                     fontSize = 11.5.sp,
                                     fontWeight = FontWeight.Bold
@@ -1111,7 +1119,7 @@ fun BillingScreen(
                             }
                         }
 
-                        if (state.transportRent > 0.0) {
+                        if (state.remoteLayoutConfig.showTransportRow && effectiveTransportRent > 0.0) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1126,7 +1134,7 @@ fun BillingScreen(
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 Text(
-                                    text = "Rs ${"%,d".format(state.transportRent.roundToLong())}",
+                                    text = "Rs ${"%,d".format(effectiveTransportRent.roundToLong())}",
                                     color = primaryInk,
                                     fontSize = 11.5.sp,
                                     fontWeight = FontWeight.Bold
