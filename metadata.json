@@ -1,0 +1,6 @@
+{
+  "name": "Boss Aluminium & Glass",
+  "description": "Client application for Boss Aluminium & Glass cutting calculator, bar length chart, glass schedule, and quotation export synced with Master Server.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
