@@ -323,11 +323,17 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
 
         // Apply cached cloud rates & glassRates directly if available
         cachedCloud?.rates?.forEach { (g, colMap) ->
-            val targetG = baseRates.getOrPut(g) { mutableMapOf() }
-            colMap.forEach { (col, secMap) ->
-                val targetCol = targetG.getOrPut(col) { mutableMapOf() }
-                secMap.forEach { (sec, r) ->
-                    if (r >= 0.0) targetCol[sec] = r
+            val gVariants = BossDefaultRates.normalizeGaugeVariants(g)
+            gVariants.forEach { gKey ->
+                val targetG = baseRates.getOrPut(gKey) { mutableMapOf() }
+                colMap.forEach { (col, secMap) ->
+                    val cVariants = BossDefaultRates.normalizeColorVariants(col)
+                    cVariants.forEach { cKey ->
+                        val targetCol = targetG.getOrPut(cKey) { mutableMapOf() }
+                        secMap.forEach { (sec, r) ->
+                            if (r >= 0.0) targetCol[sec] = r
+                        }
+                    }
                 }
             }
         }
@@ -769,11 +775,17 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
             }.toMutableMap()
 
             cloudConfig.rates?.forEach { (g, colMap) ->
-                val targetG = updatedRates.getOrPut(g) { mutableMapOf() }
-                colMap.forEach { (col, secMap) ->
-                    val targetCol = targetG.getOrPut(col) { mutableMapOf() }
-                    secMap.forEach { (sec, r) ->
-                        if (r >= 0.0) targetCol[sec] = r
+                val gVariants = BossDefaultRates.normalizeGaugeVariants(g)
+                gVariants.forEach { gKey ->
+                    val targetG = updatedRates.getOrPut(gKey) { mutableMapOf() }
+                    colMap.forEach { (col, secMap) ->
+                        val cVariants = BossDefaultRates.normalizeColorVariants(col)
+                        cVariants.forEach { cKey ->
+                            val targetCol = targetG.getOrPut(cKey) { mutableMapOf() }
+                            secMap.forEach { (sec, r) ->
+                                if (r >= 0.0) targetCol[sec] = r
+                            }
+                        }
                     }
                 }
             }
@@ -2147,7 +2159,7 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
             )
         }
         restartAccountWatcher()
-        syncMasterCloudConfigNow()
+        syncUserProfileNow()
     }
 
     fun refreshSecurityState() {
@@ -2448,6 +2460,29 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
         return results
     }
 
+    fun getSectionRate(gauge: String, color: String, section: String): Double {
+        val s = _state.value
+        val gVars = BossDefaultRates.normalizeGaugeVariants(gauge)
+        val cVars = BossDefaultRates.normalizeColorVariants(color)
+        for (gv in gVars) {
+            val colMap = s.rates[gv] ?: continue
+            for (cv in cVars) {
+                val r = colMap[cv]?.get(section)
+                if (r != null && r >= 0.0) return r
+            }
+        }
+        val fallbackG = BossDefaultRates.normalizeGaugeVariants(s.ctxGauge)
+        val fallbackC = BossDefaultRates.normalizeColorVariants(s.ctxColor)
+        for (gv in fallbackG) {
+            val colMap = s.rates[gv] ?: continue
+            for (cv in fallbackC) {
+                val r = colMap[cv]?.get(section)
+                if (r != null && r >= 0.0) return r
+            }
+        }
+        return 0.0
+    }
+
     fun calculateQuotation(frameTypeOverride: String? = null): QuotationResult {
         verifyUserSecurityWithServerNow(force = false)
         val s = _state.value
@@ -2565,9 +2600,7 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
                 totalFeet += lenFt * info.count
                 tallyParts.add("${lenFt}ftx${info.count}${if (info.isCustom) " (offcut)" else ""}")
             }
-            val ratePerFt = s.rates[g]?.get(s.ctxColor)?.get(sec)
-                ?: s.rates[s.ctxGauge]?.get(s.ctxColor)?.get(sec)
-                ?: 0.0
+            val ratePerFt = getSectionRate(g, s.ctxColor, sec)
             val cost = totalFeet * ratePerFt
             if (barsCount > 0 || totalFeet > 0) {
                 alumRows.add(

@@ -117,9 +117,26 @@ fun RatesScreen(
         }
     }
 
-    val currentColorRates = state.rates[state.ctxGauge]?.get(state.ctxColor)
-        ?: state.rates[state.ctxGauge]?.values?.firstOrNull()
-        ?: emptyMap()
+    val currentColorRates = remember(state.rates, state.ctxGauge, state.ctxColor) {
+        val gVariants = BossDefaultRates.normalizeGaugeVariants(state.ctxGauge)
+        val cVariants = BossDefaultRates.normalizeColorVariants(state.ctxColor)
+        var found: Map<String, Double>? = null
+        for (g in gVariants) {
+            val colMap = state.rates[g] ?: continue
+            for (c in cVariants) {
+                val secMap = colMap[c]
+                if (!secMap.isNullOrEmpty()) {
+                    found = secMap
+                    break
+                }
+            }
+            if (found != null) break
+        }
+        found ?: state.rates[state.ctxGauge]?.get(state.ctxColor)
+            ?: state.rates[state.ctxGauge]?.values?.firstOrNull()
+            ?: state.rates.values.firstOrNull()?.values?.firstOrNull()
+            ?: emptyMap()
+    }
 
     // Order sections in the natural order defined in BossDefaultRates.DEFAULT_SECTIONS + customSections
     val orderedSectionEntries = remember(currentColorRates, searchSection, state.hiddenSections, state.customSections, state.deletedSections) {

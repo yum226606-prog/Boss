@@ -3,6 +3,54 @@ package com.example.model
 import kotlin.math.roundToLong
 
 object BossDefaultRates {
+    fun normalizeGaugeVariants(gauge: String): List<String> {
+        val clean = gauge.trim().removeSuffix("mm").removeSuffix("MM").trim()
+        val variants = mutableListOf(clean)
+        if (clean.endsWith(".0")) {
+            variants.add(clean.removeSuffix(".0"))
+        } else if (clean.matches(Regex("^\\d+$"))) {
+            variants.add("$clean.0")
+        }
+        return variants.distinct()
+    }
+
+    fun normalizeColorVariants(color: String): List<String> {
+        val clean = color.trim().uppercase()
+        val variants = mutableListOf(clean)
+        if (clean.contains("/")) {
+            val noSpaces = clean.split("/").joinToString("/") { it.trim() }
+            val withSpaces = clean.split("/").joinToString(" / ") { it.trim() }
+            variants.add(noSpaces)
+            variants.add(withSpaces)
+        }
+        if (clean == "SAHARA/BROWN" || clean == "SAHARA / BROWN") {
+            variants.add("SAHARA/BROWN")
+            variants.add("SAHARA / BROWN")
+            variants.add("SAHARA")
+            variants.add("BROWN")
+        }
+        if (clean == "WOOD COAT" || clean == "WOOD COATED") {
+            variants.add("WOOD COAT")
+            variants.add("WOOD COATED")
+        }
+        if (clean == "SILVER/DULL" || clean == "SILVER / DULL" || clean == "DULL") {
+            variants.add("SILVER / DULL")
+            variants.add("SILVER/DULL")
+            variants.add("DULL")
+        }
+        if (clean == "H23/PC-RAL" || clean == "H23 / RAL" || clean == "H23 / PC-RAL" || clean == "H23") {
+            variants.add("H23/PC-RAL")
+            variants.add("H23 / RAL")
+            variants.add("H23 / PC-RAL")
+            variants.add("H23")
+        }
+        if (clean == "BLACK/MULTI" || clean == "BLACK / MULTI") {
+            variants.add("BLACK/MULTI")
+            variants.add("BLACK / MULTI")
+        }
+        return variants.distinct()
+    }
+
     val GAUGES = listOf("1.1", "1.2", "1.4", "1.6", "2.0", "2.5", "3.0")
 
     val DEFAULT_COLORS = listOf(
