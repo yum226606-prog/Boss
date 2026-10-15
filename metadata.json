@@ -1,6 +1,8 @@
 {
   "name": "Boss Aluminium & Glass",
-  "description": "Client application for Boss Aluminium & Glass cutting calculator, bar length chart, glass schedule, and quotation export synced with Master Server.",
+  "description": "Boss Aluminium & Glass Estimation, Cutting, Glass & Quotation System with Supabase Master Admin integration",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

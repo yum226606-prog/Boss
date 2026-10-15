@@ -1,49 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="96dp"
     android:height="96dp"
+    android:width="96dp"
     android:viewportWidth="96"
     android:viewportHeight="96">
-    <!-- Background Circle -->
     <path
-        android:fillColor="#1E232A"
-        android:pathData="M48,48m-44,0a44,44 0 1,1 88,0a44,44 0 1,1 -88,0" />
-    <!-- Border Circle Gold -->
+        android:fillColor="#1e232a"
+        android:pathData="M48,48m-44,0a44,44 0 1,1 88,0a44,44 0 1,1 -88,0"/>
     <path
-        android:strokeColor="#FFD700"
-        android:strokeWidth="2.5"
-        android:pathData="M48,48m-42,0a42,42 0 1,1 84,0a42,42 0 1,1 -84,0" />
-    <!-- Outer Window Frame (Aluminium) -->
+        android:pathData="M48,48m-42,0a42,42 0 1,1 84,0a42,42 0 1,1 -84,0"
+        android:strokeColor="#ffd700"
+        android:strokeWidth="2.5"/>
     <path
-        android:strokeColor="#FFD700"
-        android:strokeWidth="3"
-        android:fillColor="#151A21"
-        android:pathData="M24,24 h48 v48 h-48 z" />
-    <!-- Inner Cross Mullion & Transom (Sliding Window Frame) -->
+        android:fillColor="#151a21"
+        android:pathData="M24,24 h48 v48 h-48 z"
+        android:strokeColor="#ffd700"
+        android:strokeWidth="3"/>
     <path
-        android:strokeColor="#FFD700"
-        android:strokeWidth="2"
-        android:pathData="M48,24 v48 M24,48 h48" />
-    <!-- Glass Pane Accents (Cyan/Light Blue) -->
+        android:pathData="M48,24 v48 M24,48 h48"
+        android:strokeColor="#ffd700"
+        android:strokeWidth="2"/>
     <path
-        android:fillColor="#3300E5FF"
-        android:pathData="M27,27 h18 v18 h-18 z" />
+        android:fillColor="#3300e5ff"
+        android:pathData="M27,27 h18 v18 h-18 z"/>
     <path
-        android:fillColor="#3300E5FF"
-        android:pathData="M51,27 h18 v18 h-18 z" />
+        android:fillColor="#3300e5ff"
+        android:pathData="M51,27 h18 v18 h-18 z"/>
     <path
-        android:fillColor="#3300E5FF"
-        android:pathData="M27,51 h18 v18 h-18 z" />
+        android:fillColor="#3300e5ff"
+        android:pathData="M27,51 h18 v18 h-18 z"/>
     <path
-        android:fillColor="#3300E5FF"
-        android:pathData="M51,51 h18 v18 h-18 z" />
-    <!-- Glass Reflection Glare Lines -->
+        android:fillColor="#3300e5ff"
+        android:pathData="M51,51 h18 v18 h-18 z"/>
     <path
-        android:strokeColor="#80FFFFFF"
-        android:strokeWidth="1.5"
-        android:pathData="M31,29 L41,39 M55,29 L65,39 M31,53 L41,63 M55,53 L65,63" />
-    <!-- Decorative Corner Brackets -->
+        android:pathData="M31,29 L41,39 M55,29 L65,39 M31,53 L41,63 M55,53 L65,63"
+        android:strokeColor="#80ffffff"
+        android:strokeWidth="1.5"/>
     <path
-        android:strokeColor="#FFD700"
-        android:strokeWidth="1.5"
-        android:pathData="M18,18 h8 M18,18 v8 M78,18 h-8 M78,18 v8 M18,78 h8 M18,78 v-8 M78,78 h-8 M78,78 v-8" />
+        android:pathData="M18,18 h8 M18,18 v8 M78,18 h-8 M78,18 v8 M18,78 h8 M18,78 v-8 M78,78 h-8 M78,78 v-8"
+        android:strokeColor="#ffd700"
+        android:strokeWidth="1.5"/>
 </vector>

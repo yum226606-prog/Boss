@@ -5,8 +5,6 @@ import com.example.model.SubscriptionState
 import com.example.model.UserProfile
 
 object RegistrationValidator {
-    const val SECURITY_MASTER_PIN = "2796"
-
     private val FAKE_NAMES = setOf(
         "test", "testing", "fake", "dummy", "asdf", "qwer", "admin", "administrator",
         "guest", "demo", "user", "username", "null", "none", "xyz", "abc", "boss",
@@ -139,7 +137,7 @@ object RegistrationValidator {
         if (cleanCode.isBlank()) {
             return "Owner Master PIN is required to verify Owner VIP email ($email)"
         }
-        val validCodes = SubscriptionState.MASTER_PASSCODES + SECURITY_MASTER_PIN
+        val validCodes = SubscriptionState.MASTER_PASSCODES
         if (!validCodes.contains(cleanCode)) {
             return "Unauthorized: Incorrect Owner Master PIN."
         }

@@ -69,6 +69,8 @@ class TrialIdentityManager(private val context: Context) {
         val rawFingerprint = buildString {
             append(androidId)
             append("|")
+            append(Build.FINGERPRINT)
+            append("|")
             append(Build.BOARD)
             append("|")
             append(Build.BRAND)
@@ -128,8 +130,8 @@ class TrialIdentityManager(private val context: Context) {
                             name = obj.optString("name", ""),
                             shopAddress = obj.optString("shopAddress", ""),
                             ipAddress = obj.optString("ipAddress", ""),
-                            cnicPhotoPath = obj.optString("cnicPhotoPath", null),
-                            cnicBackPhotoPath = obj.optString("cnicBackPhotoPath", null),
+                            cnicPhotoPath = if (obj.has("cnicPhotoPath")) obj.optString("cnicPhotoPath").takeIf { it.isNotBlank() } else null,
+                            cnicBackPhotoPath = if (obj.has("cnicBackPhotoPath")) obj.optString("cnicBackPhotoPath").takeIf { it.isNotBlank() } else null,
                             trialStartTime = obj.optLong("trialStartTime", 0L),
                             firstRegisteredAt = obj.optLong("firstRegisteredAt", 0L),
                             isActivated = obj.optBoolean("isActivated", false),

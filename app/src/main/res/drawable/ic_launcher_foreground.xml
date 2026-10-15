@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item
-        android:width="72dp"
+        android:gravity="center"
         android:height="72dp"
-        android:drawable="@drawable/ic_boss_logo_clean"
-        android:gravity="center" />
+        android:width="72dp"
+        android:drawable="@drawable/ic_boss_logo_clean"/>
 </layer-list>

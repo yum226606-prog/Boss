@@ -1,112 +1,82 @@
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:aapt="http://schemas.android.com/aapt"
-    android:width="595dp"
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android" xmlns:aapt="http://schemas.android.com/aapt"
     android:height="842dp"
+    android:width="595dp"
     android:viewportWidth="595"
     android:viewportHeight="842">
-
-    <!-- Warm Royal Ivory / Pearl Paper Base for 100% Text Readability -->
     <path
-        android:pathData="M0,0h595v842h-595z">
-        <aapt:attr name="android:fillColor">
-            <gradient
-                android:startX="0"
-                android:startY="0"
-                android:endX="595"
-                android:endY="842"
-                android:type="linear">
-                <item android:offset="0.0" android:color="#FFFDFBF6" />
-                <item android:offset="0.5" android:color="#FFFCF8EE" />
-                <item android:offset="1.0" android:color="#FFF9F3E3" />
-            </gradient>
-        </aapt:attr>
-    </path>
-
-    <!-- Top Imperial Navy & Gold Crown Band -->
+        android:fillColor="@drawable/res_0x7f080000_bg_boss_quotation_crisp__0"
+        android:pathData="M0,0h595v842h-595z"/>
     <path
-        android:pathData="M0,0h595v8h-595z"
-        android:fillColor="#FF0F172A" />
+        android:fillColor="#ff0f172a"
+        android:pathData="M0,0h595v8h-595z"/>
     <path
-        android:pathData="M0,8h595v3.5h-595z"
-        android:fillColor="#FFD4AF37" />
-
-    <!-- Bottom Imperial Navy & Gold Base Band -->
+        android:fillColor="#ffd4af37"
+        android:pathData="M0,8h595v3.5h-595z"/>
     <path
-        android:pathData="M0,830.5h595v3.5h-595z"
-        android:fillColor="#FFD4AF37" />
+        android:fillColor="#ffd4af37"
+        android:pathData="M0,830.5h595v3.5h-595z"/>
     <path
-        android:pathData="M0,834h595v8h-595z"
-        android:fillColor="#FF0F172A" />
-
-    <!-- Outer Double Gold Architectural Frame -->
+        android:fillColor="#ff0f172a"
+        android:pathData="M0,834h595v8h-595z"/>
     <path
+        android:fillColor="#00000000"
         android:pathData="M14,18h567v806h-567z"
-        android:strokeWidth="1.6"
-        android:strokeColor="#FFC89D28"
-        android:fillColor="#00000000" />
+        android:strokeColor="#ffc89d28"
+        android:strokeWidth="1.6"/>
     <path
+        android:fillColor="#00000000"
         android:pathData="M18,22h559v798h-559z"
-        android:strokeWidth="0.7"
-        android:strokeColor="#66B4881D"
-        android:fillColor="#00000000" />
-
-    <!-- Top-Left Corner Royal Ornament -->
+        android:strokeColor="#66b4881d"
+        android:strokeWidth="0.7"/>
     <path
+        android:fillColor="#00000000"
         android:pathData="M14,42 L14,18 L38,18"
-        android:strokeWidth="3.2"
-        android:strokeColor="#FF0F172A"
-        android:fillColor="#00000000" />
+        android:strokeColor="#ff0f172a"
+        android:strokeWidth="3.2"/>
     <path
+        android:fillColor="#00000000"
         android:pathData="M22,34 L22,26 L30,26"
-        android:strokeWidth="1.5"
-        android:strokeColor="#FFD4AF37"
-        android:fillColor="#00000000" />
-
-    <!-- Top-Right Corner Royal Ornament -->
+        android:strokeColor="#ffd4af37"
+        android:strokeWidth="1.5"/>
     <path
+        android:fillColor="#00000000"
         android:pathData="M581,42 L581,18 L557,18"
-        android:strokeWidth="3.2"
-        android:strokeColor="#FF0F172A"
-        android:fillColor="#00000000" />
+        android:strokeColor="#ff0f172a"
+        android:strokeWidth="3.2"/>
     <path
+        android:fillColor="#00000000"
         android:pathData="M573,34 L573,26 L565,26"
-        android:strokeWidth="1.5"
-        android:strokeColor="#FFD4AF37"
-        android:fillColor="#00000000" />
-
-    <!-- Bottom-Left Corner Royal Ornament -->
+        android:strokeColor="#ffd4af37"
+        android:strokeWidth="1.5"/>
     <path
+        android:fillColor="#00000000"
         android:pathData="M14,800 L14,824 L38,824"
-        android:strokeWidth="3.2"
-        android:strokeColor="#FF0F172A"
-        android:fillColor="#00000000" />
+        android:strokeColor="#ff0f172a"
+        android:strokeWidth="3.2"/>
     <path
+        android:fillColor="#00000000"
         android:pathData="M22,808 L22,816 L30,816"
-        android:strokeWidth="1.5"
-        android:strokeColor="#FFD4AF37"
-        android:fillColor="#00000000" />
-
-    <!-- Bottom-Right Corner Royal Ornament -->
+        android:strokeColor="#ffd4af37"
+        android:strokeWidth="1.5"/>
     <path
+        android:fillColor="#00000000"
         android:pathData="M581,800 L581,824 L557,824"
-        android:strokeWidth="3.2"
-        android:strokeColor="#FF0F172A"
-        android:fillColor="#00000000" />
+        android:strokeColor="#ff0f172a"
+        android:strokeWidth="3.2"/>
     <path
+        android:fillColor="#00000000"
         android:pathData="M573,808 L573,816 L565,816"
-        android:strokeWidth="1.5"
-        android:strokeColor="#FFD4AF37"
-        android:fillColor="#00000000" />
-
-    <!-- Subtle Architectural Grid Lines in Center Background (Very Low Opacity for Crisp Text) -->
+        android:strokeColor="#ffd4af37"
+        android:strokeWidth="1.5"/>
     <path
+        android:fillColor="#06d4af37"
         android:pathData="M297.5,240 L417.5,421 L297.5,602 L177.5,421 Z"
-        android:strokeWidth="1.2"
-        android:strokeColor="#14C89D28"
-        android:fillColor="#06D4AF37" />
+        android:strokeColor="#14c89d28"
+        android:strokeWidth="1.2"/>
     <path
+        android:fillColor="#00000000"
         android:pathData="M297.5,280 L387.5,421 L297.5,562 L207.5,421 Z"
-        android:strokeWidth="0.8"
-        android:strokeColor="#120F172A"
-        android:fillColor="#00000000" />
+        android:strokeColor="#120f172a"
+        android:strokeWidth="0.8"/>
 </vector>

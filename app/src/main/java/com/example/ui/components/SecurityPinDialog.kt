@@ -20,8 +20,6 @@ import androidx.compose.ui.window.DialogProperties
 import com.example.model.SubscriptionState
 import com.example.ui.theme.*
 
-const val SECURITY_MASTER_PIN = "2796"
-
 @Composable
 fun SecurityPinDialog(
     title: String = "Security PIN Required",
