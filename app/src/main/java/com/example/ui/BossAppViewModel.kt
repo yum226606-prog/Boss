@@ -436,6 +436,18 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
                 "quotation_terms",
                 "1. 50% Advance payment required to start work.\n2. Balance 50% upon material delivery.\n3. Quotation valid for 7 days only."
             ) ?: "1. 50% Advance payment required to start work.\n2. Balance 50% upon material delivery.\n3. Quotation valid for 7 days only."
+        val finalDeletedUpper = effectiveDeletedSecs.map { it.trim().uppercase() }.toSet()
+        if (finalDeletedUpper.isNotEmpty()) {
+            baseRates.forEach { (_, colorMap) ->
+                colorMap.forEach { (_, secMap) ->
+                    secMap.keys.removeAll { k ->
+                        effectiveDeletedSecs.contains(k) || finalDeletedUpper.contains(k.trim().uppercase())
+                    }
+                }
+            }
+        }
+
+        val savedHwRate = prefs.getFloat("hardware_rate_per_unit", prefs.getFloat("win_hw_rate", 450f)).toDouble()
 
         return BossAppState(
             ctxGauge = prefs.getString("ctx_gauge", "1.6") ?: "1.6",
@@ -472,10 +484,11 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
             glassFormulas = restoredGlassFormulas,
             alumDiscountPercent = prefs.getFloat("alum_discount_pct", 0f).toDouble(),
             autoIncludeHardware = prefs.getBoolean("auto_include_hw", true),
-            windowHardwareRate = prefs.getFloat("win_hw_rate", 1500f).toDouble(),
-            doorHardwareRate = prefs.getFloat("door_hw_rate", 2500f).toDouble(),
-            fixHardwareRate = prefs.getFloat("fix_hw_rate", 800f).toDouble(),
-            slidingDoorHardwareRate = prefs.getFloat("sd_hw_rate", 3000f).toDouble(),
+            hardwareRatePerUnit = savedHwRate,
+            windowHardwareRate = savedHwRate,
+            doorHardwareRate = savedHwRate,
+            fixHardwareRate = savedHwRate,
+            slidingDoorHardwareRate = savedHwRate,
             wastagePercent = 0.0,
             profitPercent = prefs.getFloat("profit_pct", 0f).toDouble(),
             taxPercent = 0.0,
@@ -770,6 +783,21 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
         } else null
 
         _state.update { cur ->
+            val storedDeleted = prefs.getStringSet("deleted_sections_set", emptySet())
+                ?.filterNotNull()
+                ?.map { it.trim() }
+                ?.filter { it.isNotBlank() }
+                ?.toSet()
+                ?: emptySet()
+            val mergedDeleted = (cur.deletedSections + cloudConfig.deletedSections + storedDeleted)
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .toSet()
+            prefs.edit().putStringSet("deleted_sections_set", mergedDeleted).apply()
+
+            val mergedHidden = cloudConfig.hiddenSections
+            val allHiddenOrDeletedUpper = (mergedDeleted + mergedHidden).map { it.trim().uppercase() }.toSet()
+
             val updatedRates = cur.rates.mapValues { (_, colorMap) ->
                 colorMap.mapValues { (_, secMap) -> secMap.toMutableMap() }.toMutableMap()
             }.toMutableMap()
@@ -783,7 +811,10 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
                         cVariants.forEach { cKey ->
                             val targetCol = targetG.getOrPut(cKey) { mutableMapOf() }
                             secMap.forEach { (sec, r) ->
-                                if (r >= 0.0) targetCol[sec] = r
+                                val sClean = sec.trim()
+                                if (r >= 0.0 && !mergedDeleted.contains(sClean) && !allHiddenOrDeletedUpper.contains(sClean.uppercase())) {
+                                    targetCol[sClean] = r
+                                }
                             }
                         }
                     }
@@ -801,25 +832,20 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
             }
 
             cloudConfig.customSections.filter { it.isActive }.forEach { dyn ->
-                if (dyn.defaultRate > 0) {
+                val dynCodeClean = dyn.code.trim()
+                if (dyn.defaultRate > 0 && !mergedDeleted.contains(dynCodeClean) && !allHiddenOrDeletedUpper.contains(dynCodeClean.uppercase())) {
                     updatedRates.forEach { (g, colorMap) ->
                         val ratio = (g.toDoubleOrNull() ?: 1.2) / (dyn.defaultGauge.toDoubleOrNull() ?: 1.6).coerceAtLeast(1.0)
                         colorMap.forEach { (_, secMap) ->
-                            if (!secMap.containsKey(dyn.code)) {
-                                secMap[dyn.code] = (dyn.defaultRate * ratio).roundToLong().toDouble()
+                            if (!secMap.containsKey(dynCodeClean)) {
+                                secMap[dynCodeClean] = (dyn.defaultRate * ratio).roundToLong().toDouble()
                             }
                         }
                     }
                 }
             }
 
-            val mergedDeleted = if (cloudConfig.deletedSections.isNotEmpty()) {
-                cur.deletedSections + cloudConfig.deletedSections
-            } else cur.deletedSections
-            val mergedHidden = cloudConfig.hiddenSections
-
-            val allHiddenOrDeletedUpper = (mergedDeleted + mergedHidden).map { it.trim().uppercase() }.toSet()
-            val dynCodes = cloudConfig.customSections.filter { it.isActive }.map { it.code }
+            val dynCodes = cloudConfig.customSections.filter { it.isActive }.map { it.code.trim() }
             val rateSecCodes = updatedRates.values.flatMap { colMap -> colMap.values.flatMap { it.keys } }.distinct()
             val mergedCustomSecs = (cur.customSections + dynCodes + rateSecCodes).distinct().filterNot {
                 mergedDeleted.contains(it) || mergedHidden.contains(it) || allHiddenOrDeletedUpper.contains(it.trim().uppercase())
@@ -1118,13 +1144,19 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
     }
 
     // Windows CRUD
-    fun addWindow() {
+    fun addWindow(
+        width: Double = 48.0,
+        height: Double = 48.0,
+        qty: Int = 1,
+        panelCount: Int = 2
+    ) {
         _state.update { cur ->
             val newWin = WindowItem(
                 id = UUID.randomUUID().toString(),
-                width = 48.0,
-                height = 48.0,
-                qty = 1,
+                width = width,
+                height = height,
+                qty = qty,
+                panelCount = panelCount,
                 frameType = if (cur.ctxFrameType == "OFF") "C" else cur.ctxFrameType,
                 sectionGauge = cur.ctxGauge,
                 glassGauge = cur.ctxGlassGauge,
@@ -1147,14 +1179,19 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
     }
 
     // Doors CRUD
-    fun addDoor() {
+    fun addDoor(
+        width: Double = 36.0,
+        height: Double = 84.0,
+        qty: Int = 1,
+        outer: String = "D54A"
+    ) {
         _state.update { cur ->
             val newDoor = DoorItem(
                 id = UUID.randomUUID().toString(),
-                width = 36.0,
-                height = 84.0,
-                qty = 1,
-                outer = "D54A",
+                width = width,
+                height = height,
+                qty = qty,
+                outer = outer,
                 sectionGauge = cur.ctxGauge,
                 glassGauge = cur.ctxGlassGauge,
                 glassColor = cur.ctxGlassColor
@@ -1176,14 +1213,19 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
     }
 
     // Fix Frames CRUD
-    fun addFixFrame() {
+    fun addFixFrame(
+        width: Double = 48.0,
+        height: Double = 48.0,
+        qty: Int = 1,
+        outer: String = "D54A"
+    ) {
         _state.update { cur ->
             val item = FixFrameItem(
                 id = UUID.randomUUID().toString(),
-                width = 48.0,
-                height = 48.0,
-                qty = 1,
-                outer = "D54A",
+                width = width,
+                height = height,
+                qty = qty,
+                outer = outer,
                 sectionGauge = cur.ctxGauge,
                 glassGauge = cur.ctxGlassGauge,
                 glassColor = cur.ctxGlassColor
@@ -1205,14 +1247,19 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
     }
 
     // Openable Windows CRUD
-    fun addOpenableWindow() {
+    fun addOpenableWindow(
+        width: Double = 36.0,
+        height: Double = 48.0,
+        qty: Int = 1,
+        outer: String = "D54A"
+    ) {
         _state.update { cur ->
             val item = OpenableWindowItem(
                 id = UUID.randomUUID().toString(),
-                width = 36.0,
-                height = 48.0,
-                qty = 1,
-                outer = "D54A",
+                width = width,
+                height = height,
+                qty = qty,
+                outer = outer,
                 sectionGauge = cur.ctxGauge,
                 glassGauge = cur.ctxGlassGauge,
                 glassColor = cur.ctxGlassColor
@@ -1234,14 +1281,22 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
     }
 
     // Sliding Doors CRUD
-    fun addSlidingDoor() {
+    fun addSlidingDoor(
+        width: Double = 72.0,
+        height: Double = 84.0,
+        qty: Int = 1,
+        outer: String = "NORMAL",
+        panelCount: Int = 2
+    ) {
         _state.update { cur ->
             val item = SlidingDoorItem(
                 id = UUID.randomUUID().toString(),
-                width = 72.0,
-                height = 84.0,
-                qty = 1,
-                outer = "NORMAL",
+                width = width,
+                height = height,
+                qty = qty,
+                outer = outer,
+                panelCount = panelCount,
+                m24Qty = panelCount * 2,
                 sectionGauge = cur.ctxGauge,
                 glassGauge = cur.ctxGlassGauge,
                 glassColor = cur.ctxGlassColor
@@ -2024,18 +2079,30 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
         _state.update { it.copy(alumDiscountPercent = clean) }
     }
 
-    fun updateSingleHardwareAmount(hardwareAmount: Double) {
-        val clean = hardwareAmount.coerceAtLeast(0.0)
+    fun updateHardwareRate(hardwareRate: Double) {
+        val clean = hardwareRate.coerceAtLeast(0.0)
         prefs.edit()
             .putBoolean("auto_include_hw", true)
+            .putFloat("hardware_rate_per_unit", clean.toFloat())
             .putFloat("win_hw_rate", clean.toFloat())
+            .putFloat("door_hw_rate", clean.toFloat())
+            .putFloat("fix_hw_rate", clean.toFloat())
+            .putFloat("sd_hw_rate", clean.toFloat())
             .apply()
         _state.update {
             it.copy(
                 autoIncludeHardware = true,
-                windowHardwareRate = clean
+                hardwareRatePerUnit = clean,
+                windowHardwareRate = clean,
+                doorHardwareRate = clean,
+                fixHardwareRate = clean,
+                slidingDoorHardwareRate = clean
             )
         }
+    }
+
+    fun updateSingleHardwareAmount(hardwareAmount: Double) {
+        updateHardwareRate(hardwareAmount)
     }
 
     fun addCustomBillItem(description: String, amount: Double) {
@@ -2054,21 +2121,24 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
 
     fun saveHardwareAndQuotationDefaults(
         autoInclude: Boolean,
-        winHw: Double,
-        doorHw: Double,
-        fixHw: Double,
-        sdHw: Double,
+        hwRate: Double,
         profitPct: Double,
         labour: Double,
         transport: Double,
-        terms: String
+        terms: String,
+        winHw: Double = hwRate,
+        doorHw: Double = hwRate,
+        fixHw: Double = hwRate,
+        sdHw: Double = hwRate
     ) {
+        val cleanHw = hwRate.coerceAtLeast(0.0)
         prefs.edit()
             .putBoolean("auto_include_hw", autoInclude)
-            .putFloat("win_hw_rate", winHw.toFloat())
-            .putFloat("door_hw_rate", doorHw.toFloat())
-            .putFloat("fix_hw_rate", fixHw.toFloat())
-            .putFloat("sd_hw_rate", sdHw.toFloat())
+            .putFloat("hardware_rate_per_unit", cleanHw.toFloat())
+            .putFloat("win_hw_rate", cleanHw.toFloat())
+            .putFloat("door_hw_rate", cleanHw.toFloat())
+            .putFloat("fix_hw_rate", cleanHw.toFloat())
+            .putFloat("sd_hw_rate", cleanHw.toFloat())
             .putFloat("wastage_pct", 0f)
             .putFloat("profit_pct", profitPct.toFloat())
             .putFloat("tax_pct", 0f)
@@ -2079,10 +2149,11 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
         _state.update {
             it.copy(
                 autoIncludeHardware = autoInclude,
-                windowHardwareRate = winHw,
-                doorHardwareRate = doorHw,
-                fixHardwareRate = fixHw,
-                slidingDoorHardwareRate = sdHw,
+                hardwareRatePerUnit = cleanHw,
+                windowHardwareRate = cleanHw,
+                doorHardwareRate = cleanHw,
+                fixHardwareRate = cleanHw,
+                slidingDoorHardwareRate = cleanHw,
                 wastagePercent = 0.0,
                 profitPercent = profitPct,
                 taxPercent = 0.0,
@@ -2092,6 +2163,95 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
                 markupPercent = profitPct
             )
         }
+    }
+
+    fun restoreDefaultRates() {
+        _state.update { cur ->
+            cur.copy(
+                rates = BossDefaultRates.getInitialRates()
+            )
+        }
+        val editor = prefs.edit()
+        val customKeys = prefs.getStringSet("user_custom_rate_keys", emptySet()) ?: emptySet()
+        customKeys.forEach { key ->
+            val parts = key.split("|")
+            if (parts.size == 3) {
+                editor.remove("user_sec_rate_${parts[0]}_${parts[1]}_${parts[2]}")
+            }
+        }
+        editor.remove("user_custom_rate_keys")
+        editor.apply()
+    }
+
+    fun upsertScannedRates(rows: List<ScannedRateRow>): Pair<Int, Int> {
+        var updated = 0
+        var inserted = 0
+        val existingKeys = (prefs.getStringSet("user_custom_rate_keys", emptySet()) ?: emptySet()).toMutableSet()
+        val editor = prefs.edit()
+
+        _state.update { cur ->
+            val nextRates = cur.rates.mapValues { (_, colMap) ->
+                colMap.mapValues { (_, secMap) -> secMap.toMutableMap() }.toMutableMap()
+            }.toMutableMap()
+            val nextColors = cur.availableColors.toMutableList()
+            val nextCustomSecs = cur.customSections.toMutableList()
+
+            rows.forEach { r ->
+                val cleanG = r.gauge.replace("mm", "", ignoreCase = true).trim().ifBlank { "1.2" }
+                val col = r.color.trim().uppercase()
+                val sec = r.sectionCode.trim().uppercase()
+                val rate = r.rate
+                if (sec.isBlank() || rate <= 0.0) return@forEach
+
+                if (!nextColors.contains(col)) nextColors.add(col)
+                if (!nextCustomSecs.contains(sec)) nextCustomSecs.add(sec)
+
+                val gMap = nextRates.getOrPut(cleanG) { mutableMapOf() }
+                val colMap = gMap.getOrPut(col) { mutableMapOf() }
+
+                if (colMap.containsKey(sec)) {
+                    updated++
+                } else {
+                    inserted++
+                }
+                colMap[sec] = rate
+                editor.putFloat("user_sec_rate_${cleanG}_${col}_$sec", rate.toFloat())
+                existingKeys.add("$cleanG|$col|$sec")
+
+                // Sync combined color keys used by chips
+                if (col == "H23" || col == "PC-RAL") {
+                    val combMap = gMap.getOrPut("H23/PC-RAL") { mutableMapOf() }
+                    combMap[sec] = rate
+                    editor.putFloat("user_sec_rate_${cleanG}_H23/PC-RAL_$sec", rate.toFloat())
+                    existingKeys.add("$cleanG|H23/PC-RAL|$sec")
+                }
+                if (col == "SAHARA" || col == "BROWN") {
+                    val combMap = gMap.getOrPut("SAHARA/BROWN") { mutableMapOf() }
+                    combMap[sec] = rate
+                    editor.putFloat("user_sec_rate_${cleanG}_SAHARA/BROWN_$sec", rate.toFloat())
+                    existingKeys.add("$cleanG|SAHARA/BROWN|$sec")
+                }
+                if (col == "BLACK" || col == "MULTI") {
+                    val combMap = gMap.getOrPut("BLACK/MULTI") { mutableMapOf() }
+                    combMap[sec] = rate
+                    editor.putFloat("user_sec_rate_${cleanG}_BLACK/MULTI_$sec", rate.toFloat())
+                    existingKeys.add("$cleanG|BLACK/MULTI|$sec")
+                }
+            }
+
+            editor.putStringSet("user_custom_rate_keys", existingKeys)
+            editor.putStringSet("user_custom_sections", nextCustomSecs.toSet())
+            editor.putStringSet("user_available_colors", nextColors.toSet())
+            editor.apply()
+
+            cur.copy(
+                rates = nextRates,
+                availableColors = nextColors.distinct(),
+                customSections = nextCustomSecs.distinct()
+            )
+        }
+
+        return Pair(updated, inserted)
     }
 
     fun updateLabourAndTransport(labour: Double, transport: Double) {
@@ -2637,7 +2797,7 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
         val totalUnits = winCount + doorCount + fixCount + sdCount
 
         val hardwareTotal = if (s.remoteLayoutConfig.showHardwareRow && s.autoIncludeHardware) {
-            s.windowHardwareRate.coerceAtLeast(0.0)
+            totalUnits * s.hardwareRatePerUnit.coerceAtLeast(0.0)
         } else 0.0
 
         val glassCuts = getGlassCuts()
@@ -2672,6 +2832,7 @@ class BossAppViewModel(application: Application) : AndroidViewModel(application)
             markupPct = 0.0,
             totalUnits = totalUnits,
             hardwareTotal = hardwareTotal,
+            hardwareRate = s.hardwareRatePerUnit,
             glassTotal = glassTotal,
             glassLines = glassLines,
             transportRent = effectiveTransport,

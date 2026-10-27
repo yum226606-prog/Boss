@@ -32,8 +32,6 @@ fun SecurityPinDialog(
 
     val cleanDescription = remember(description) {
         description
-            .replace("($SECURITY_MASTER_PIN)", "")
-            .replace(SECURITY_MASTER_PIN, "")
             .replace(Regex("""\s*\(\d+\)\s*"""), " ")
             .replace("  ", " ")
             .trim()
@@ -115,8 +113,7 @@ fun SecurityPinDialog(
             Button(
                 onClick = {
                     val cleanPin = pinText.trim().uppercase()
-                    val isValid = cleanPin == SECURITY_MASTER_PIN ||
-                        cleanPin in SubscriptionState.MASTER_PASSCODES
+                    val isValid = cleanPin in SubscriptionState.MASTER_PASSCODES
                     if (isValid) {
                         onSuccess()
                         onDismiss()

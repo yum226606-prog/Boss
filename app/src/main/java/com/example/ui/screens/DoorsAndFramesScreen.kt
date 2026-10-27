@@ -4,9 +4,12 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -34,11 +37,11 @@ import com.example.ui.components.ExtraPiecesSection
 import com.example.ui.theme.*
 import kotlinx.coroutines.launch
 
-enum class DoorSectionType(val title: String) {
-    DOORS("Openable Doors"),
-    FIX("Fix Frames"),
-    OP_WIN("Openable Windows"),
-    SLIDING("Sliding Doors")
+enum class DoorSectionType(val title: String, val tabKey: String) {
+    DOORS("Openable Doors", "DOORS"),
+    FIX("Fix Frames", "FIX"),
+    OP_WIN("Openable Windows", "OP_WIN"),
+    SLIDING("Sliding Doors", "SLIDING")
 }
 
 @Composable
@@ -46,10 +49,34 @@ fun DoorsAndFramesScreen(
     viewModel: BossAppViewModel,
     state: BossAppState
 ) {
-    var selectedCategory by remember { mutableStateOf(DoorSectionType.DOORS) }
+    val visibleCategories = remember(state.remoteLayoutConfig) {
+        val enabled = DoorSectionType.values().filter { cat ->
+            state.remoteLayoutConfig.isClientTabEnabled(cat.tabKey, cat.title)
+        }
+        if (enabled.isNotEmpty()) enabled else DoorSectionType.values().toList()
+    }
+    var selectedCategory by remember { mutableStateOf(visibleCategories.firstOrNull() ?: DoorSectionType.DOORS) }
+    if (selectedCategory !in visibleCategories) {
+        selectedCategory = visibleCategories.firstOrNull() ?: DoorSectionType.DOORS
+    }
+
     val baseOuterOptions = listOf("D54A", "D51", "D51A", "D45", "D45A", "D42", "D42F", "D54F", "D51F", "D45F")
         .filter { !state.deletedSections.contains(it) }
     val allOuterOptions = (baseOuterOptions + state.customSections).distinct()
+
+    val categoryBlueprints = remember(state.dragDropBlueprints, selectedCategory) {
+        state.dragDropBlueprints.filter { bp ->
+            val cat = bp.category.trim().lowercase()
+            when (selectedCategory) {
+                DoorSectionType.DOORS -> (cat.contains("door") && !cat.contains("sliding")) || cat.contains("swing") || cat == "doors"
+                DoorSectionType.FIX -> cat.contains("fix")
+                DoorSectionType.OP_WIN -> (cat.contains("open") && cat.contains("win")) || cat.contains("op_win") || cat.contains("casement")
+                DoorSectionType.SLIDING -> (cat.contains("sliding") && cat.contains("door")) || cat.contains("slide door") || (cat.contains("sliding") && !cat.contains("window"))
+            }
+        }
+    }
+
+    val currentTabCustomTitle = state.remoteLayoutConfig.getTabTitle(selectedCategory.tabKey, selectedCategory.title)
 
     Column(
         modifier = Modifier
@@ -58,19 +85,20 @@ fun DoorsAndFramesScreen(
             .padding(12.dp)
     ) {
         ScrollableTabRow(
-            selectedTabIndex = selectedCategory.ordinal,
+            selectedTabIndex = visibleCategories.indexOf(selectedCategory).coerceAtLeast(0),
             containerColor = BossCarbonPanel,
             contentColor = BossGold,
             edgePadding = 0.dp,
             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
         ) {
-            DoorSectionType.values().forEach { cat ->
+            visibleCategories.forEach { cat ->
+                val displayTitle = state.remoteLayoutConfig.getTabTitle(cat.tabKey, cat.title)
                 Tab(
                     selected = selectedCategory == cat,
                     onClick = { selectedCategory = cat },
                     text = {
                         Text(
-                            text = cat.title,
+                            text = displayTitle,
                             fontSize = 12.sp,
                             fontWeight = if (selectedCategory == cat) FontWeight.Bold else FontWeight.Normal,
                             color = if (selectedCategory == cat) BossGold else BossTextDim
@@ -87,13 +115,14 @@ fun DoorsAndFramesScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            val count = when (selectedCategory) {
+                DoorSectionType.DOORS -> state.doors.size
+                DoorSectionType.FIX -> state.fixframes.size
+                DoorSectionType.OP_WIN -> state.openableWindows.size
+                DoorSectionType.SLIDING -> state.slidingDoors.size
+            }
             Text(
-                text = when (selectedCategory) {
-                    DoorSectionType.DOORS -> "Openable Doors (${state.doors.size})"
-                    DoorSectionType.FIX -> "Fix Frames (${state.fixframes.size})"
-                    DoorSectionType.OP_WIN -> "Openable Windows (${state.openableWindows.size})"
-                    DoorSectionType.SLIDING -> "Sliding Doors (${state.slidingDoors.size})"
-                },
+                text = "$currentTabCustomTitle ($count)",
                 color = BossGold,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Bold
@@ -116,6 +145,73 @@ fun DoorsAndFramesScreen(
                     Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("Add Item", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        if (categoryBlueprints.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                colors = CardDefaults.cardColors(containerColor = BossCarbonPanel),
+                border = BorderStroke(1.dp, BossGold.copy(alpha = 0.4f))
+            ) {
+                Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(Icons.Default.Extension, contentDescription = null, tint = BossGold, modifier = Modifier.size(15.dp))
+                        Text(
+                            text = "Supabase Blueprint Presets (${categoryBlueprints.size})",
+                            color = BossGold,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        categoryBlueprints.forEach { bp ->
+                            val wFt = if (bp.widthFt > 0) bp.widthFt else if (selectedCategory == DoorSectionType.SLIDING) 6.0 else 3.0
+                            val hFt = if (bp.heightFt > 0) bp.heightFt else 7.0
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = BossCarbonPanel2,
+                                border = BorderStroke(1.dp, BossGold.copy(alpha = 0.5f)),
+                                modifier = Modifier.clickable {
+                                    when (selectedCategory) {
+                                        DoorSectionType.DOORS -> viewModel.addDoor(width = wFt * 12.0, height = hFt * 12.0)
+                                        DoorSectionType.FIX -> viewModel.addFixFrame(width = wFt * 12.0, height = hFt * 12.0)
+                                        DoorSectionType.OP_WIN -> viewModel.addOpenableWindow(width = wFt * 12.0, height = hFt * 12.0)
+                                        DoorSectionType.SLIDING -> viewModel.addSlidingDoor(width = wFt * 12.0, height = hFt * 12.0, panelCount = bp.panels)
+                                    }
+                                }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(bp.label, color = BossText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                    Surface(
+                                        shape = RoundedCornerShape(3.dp),
+                                        color = BossGold.copy(alpha = 0.2f)
+                                    ) {
+                                        Text(
+                                            "${wFt.toInt()}'x${hFt.toInt()}'" + if (selectedCategory == DoorSectionType.SLIDING) " • ${bp.panels}P" else "",
+                                            color = BossGold,
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                        )
+                                    }
+                                    Icon(Icons.Default.Add, contentDescription = "Add", tint = BossGold, modifier = Modifier.size(14.dp))
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -696,6 +792,89 @@ fun GenericFrameCard(
                     ),
                     modifier = Modifier.weight(0.7f)
                 )
+            }
+
+            // Counter Steppers & Quick Adjustment
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Counter Steppers:", color = BossTextDim, fontSize = 10.5.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = BossCarbonPanel2,
+                        border = BorderStroke(1.dp, BossCarbonBorder),
+                        modifier = Modifier.clickable {
+                            val newQty = (qty - 1).coerceAtLeast(1)
+                            qtyText = newQty.toString()
+                            onUpdate(width, height, newQty, outer, glassEnabled, sectionGauge, glassGauge, glassColor)
+                        }
+                    ) {
+                        Text("Qty -", color = BossGold, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = BossCarbonPanel2,
+                        border = BorderStroke(1.dp, BossCarbonBorder),
+                        modifier = Modifier.clickable {
+                            val newQty = qty + 1
+                            qtyText = newQty.toString()
+                            onUpdate(width, height, newQty, outer, glassEnabled, sectionGauge, glassGauge, glassColor)
+                        }
+                    ) {
+                        Text("Qty +", color = BossGold, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = BossCarbonPanel2,
+                        border = BorderStroke(1.dp, BossCarbonBorder),
+                        modifier = Modifier.clickable {
+                            val newW = (width - 1.0).coerceAtLeast(6.0)
+                            widthText = BossCalculationEngine.formatDimValueOnly(newW, unit)
+                            onUpdate(newW, height, qty, outer, glassEnabled, sectionGauge, glassGauge, glassColor)
+                        }
+                    ) {
+                        Text("W -1\"", color = BossText, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = BossCarbonPanel2,
+                        border = BorderStroke(1.dp, BossCarbonBorder),
+                        modifier = Modifier.clickable {
+                            val newW = width + 1.0
+                            widthText = BossCalculationEngine.formatDimValueOnly(newW, unit)
+                            onUpdate(newW, height, qty, outer, glassEnabled, sectionGauge, glassGauge, glassColor)
+                        }
+                    ) {
+                        Text("W +1\"", color = BossText, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = BossCarbonPanel2,
+                        border = BorderStroke(1.dp, BossCarbonBorder),
+                        modifier = Modifier.clickable {
+                            val newH = (height - 1.0).coerceAtLeast(6.0)
+                            heightText = BossCalculationEngine.formatDimValueOnly(newH, unit)
+                            onUpdate(width, newH, qty, outer, glassEnabled, sectionGauge, glassGauge, glassColor)
+                        }
+                    ) {
+                        Text("H -1\"", color = BossText, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = BossCarbonPanel2,
+                        border = BorderStroke(1.dp, BossCarbonBorder),
+                        modifier = Modifier.clickable {
+                            val newH = height + 1.0
+                            heightText = BossCalculationEngine.formatDimValueOnly(newH, unit)
+                            onUpdate(width, newH, qty, outer, glassEnabled, sectionGauge, glassGauge, glassColor)
+                        }
+                    ) {
+                        Text("H +1\"", color = BossText, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
+                    }
+                }
             }
 
             val isFrameLocked = isSlidingDoor && masterFrameType != "OFF"

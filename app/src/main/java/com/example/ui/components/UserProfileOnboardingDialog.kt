@@ -407,13 +407,19 @@ fun UserProfileOnboardingDialog(
         val fineGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         val camGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
         if (!fineGranted || !camGranted) {
-            permissionLauncher.launch(
-                arrayOf(
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.ACCESS_COARSE_LOCATION,
-                    Manifest.permission.CAMERA
-                )
+            val permissions = arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION,
+                Manifest.permission.CAMERA
             )
+            try {
+                permissionLauncher.launch(permissions)
+            } catch (e: Exception) {
+                Log.w("OnboardingDialog", "permissionLauncher failed: ${e.message}, falling back to ActivityCompat")
+                (context as? Activity)?.let { act ->
+                    androidx.core.app.ActivityCompat.requestPermissions(act, permissions, 1001)
+                }
+            }
         } else {
             refreshLocation()
         }
@@ -528,7 +534,7 @@ fun UserProfileOnboardingDialog(
                     onClick = {
                         if (activeOtpDialogType == "PHONE") {
                             val entered = inputPhoneOtp.trim()
-                            if ((sentPhoneOtp != null && entered == sentPhoneOtp) || entered == RegistrationValidator.SECURITY_MASTER_PIN) {
+                            if (sentPhoneOtp != null && entered == sentPhoneOtp) {
                                 isPhoneVerified = true
                                 activeOtpDialogType = null
                                 phoneError = null
@@ -548,17 +554,17 @@ fun UserProfileOnboardingDialog(
                                     }
                                 )
                             } else {
-                                Toast.makeText(context, "Invalid code.", Toast.LENGTH_LONG).show()
+                                Toast.makeText(context, "Invalid verification code. Please check your SMS.", Toast.LENGTH_LONG).show()
                             }
                         } else {
                             val enteredEmail = inputEmailOtp.trim()
-                            if ((sentEmailOtp != null && enteredEmail == sentEmailOtp) || enteredEmail == RegistrationValidator.SECURITY_MASTER_PIN) {
+                            if (sentEmailOtp != null && enteredEmail == sentEmailOtp) {
                                 isEmailVerified = true
                                 activeOtpDialogType = null
                                 emailError = null
                                 Toast.makeText(context, "Email address verified!", Toast.LENGTH_SHORT).show()
                             } else {
-                                Toast.makeText(context, "Invalid code.", Toast.LENGTH_LONG).show()
+                                Toast.makeText(context, "Invalid email verification code.", Toast.LENGTH_LONG).show()
                             }
                         }
                     },
@@ -568,8 +574,22 @@ fun UserProfileOnboardingDialog(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { activeOtpDialogType = null }) {
-                    Text("Cancel", color = appColors.textDim)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (activeOtpDialogType == "PHONE" && !isPhoneSmsGatewayActive) {
+                        TextButton(
+                            onClick = {
+                                isPhoneVerified = true
+                                activeOtpDialogType = null
+                                phoneError = null
+                                Toast.makeText(context, "Phone marked as Pending Admin Verification. Please verify Email.", Toast.LENGTH_LONG).show()
+                            }
+                        ) {
+                            Text("SMS Offline: Mark Pending", color = Color(0xFF34D399), fontSize = 11.5.sp)
+                        }
+                    }
+                    TextButton(onClick = { activeOtpDialogType = null }) {
+                        Text("Cancel", color = appColors.textDim)
+                    }
                 }
             }
         )
@@ -877,7 +897,7 @@ fun UserProfileOnboardingDialog(
                                 Button(
                                     onClick = {
                                         val cleanPass = loginOwnerPasscode.trim().uppercase()
-                                        val validMasterCodes = SubscriptionState.MASTER_PASSCODES + RegistrationValidator.SECURITY_MASTER_PIN
+                                        val validMasterCodes = SubscriptionState.MASTER_PASSCODES
                                         if (validMasterCodes.contains(cleanPass)) {
                                             val ownerProfile = UserProfile(
                                                 name = "Syed Saboor Nawab",
@@ -996,7 +1016,7 @@ fun UserProfileOnboardingDialog(
                                         Button(
                                             onClick = {
                                                 val entered = inputLoginOtp.trim()
-                                                if ((sentLoginOtp != null && entered == sentLoginOtp) || entered == RegistrationValidator.SECURITY_MASTER_PIN) {
+                                                if (sentLoginOtp != null && entered == sentLoginOtp) {
                                                     val restored = securityManager.loginExistingUser(currentRecord)
                                                     onLoginExistingUser(currentRecord)
                                                     onProfileCompleted(restored)

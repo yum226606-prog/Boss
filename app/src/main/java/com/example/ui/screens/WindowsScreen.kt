@@ -8,6 +8,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -45,6 +48,14 @@ fun WindowsScreen(
             .background(BossCarbonBg)
             .padding(12.dp)
     ) {
+        val screenTitle = state.remoteLayoutConfig.getTabTitle("WINDOWS", "Sliding Windows")
+        val windowBlueprints = remember(state.dragDropBlueprints) {
+            state.dragDropBlueprints.filter { bp ->
+                bp.category.contains("Window", ignoreCase = true) ||
+                    (!bp.category.contains("Door", ignoreCase = true) && !bp.category.contains("Fix", ignoreCase = true))
+            }
+        }
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -52,7 +63,7 @@ fun WindowsScreen(
         ) {
             Column {
                 Text(
-                    text = "Sliding Windows (${state.windows.size})",
+                    text = "$screenTitle (${state.windows.size})",
                     color = BossGold,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold
@@ -68,6 +79,72 @@ fun WindowsScreen(
                     Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("Add Window", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        if (windowBlueprints.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                colors = CardDefaults.cardColors(containerColor = BossCarbonPanel),
+                border = BorderStroke(1.dp, BossGold.copy(alpha = 0.4f))
+            ) {
+                Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(Icons.Default.Extension, contentDescription = null, tint = BossGold, modifier = Modifier.size(15.dp))
+                        Text(
+                            text = "Supabase Blueprint Presets (${windowBlueprints.size})",
+                            color = BossGold,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        windowBlueprints.forEach { bp ->
+                            val wFt = if (bp.widthFt > 0) bp.widthFt else 4.0
+                            val hFt = if (bp.heightFt > 0) bp.heightFt else 4.0
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = BossCarbonPanel2,
+                                border = BorderStroke(1.dp, BossGold.copy(alpha = 0.5f)),
+                                modifier = Modifier.clickable {
+                                    viewModel.addWindow(
+                                        width = wFt * 12.0,
+                                        height = hFt * 12.0,
+                                        panelCount = bp.panels
+                                    )
+                                }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(bp.label, color = BossText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                    Surface(
+                                        shape = RoundedCornerShape(3.dp),
+                                        color = BossGold.copy(alpha = 0.2f)
+                                    ) {
+                                        Text(
+                                            "${wFt.toInt()}'x${hFt.toInt()}' • ${bp.panels}P",
+                                            color = BossGold,
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                        )
+                                    }
+                                    Icon(Icons.Default.Add, contentDescription = "Add", tint = BossGold, modifier = Modifier.size(14.dp))
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -342,6 +419,89 @@ fun WindowCard(
                     ),
                     modifier = Modifier.weight(0.7f)
                 )
+            }
+
+            // Counter Steppers & Quick Adjustment
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Counter Steppers:", color = BossTextDim, fontSize = 10.5.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = BossCarbonPanel2,
+                        border = BorderStroke(1.dp, BossCarbonBorder),
+                        modifier = Modifier.clickable {
+                            val newQty = (item.qty - 1).coerceAtLeast(1)
+                            qtyText = newQty.toString()
+                            onUpdate(item.copy(qty = newQty))
+                        }
+                    ) {
+                        Text("Qty -", color = BossGold, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = BossCarbonPanel2,
+                        border = BorderStroke(1.dp, BossCarbonBorder),
+                        modifier = Modifier.clickable {
+                            val newQty = item.qty + 1
+                            qtyText = newQty.toString()
+                            onUpdate(item.copy(qty = newQty))
+                        }
+                    ) {
+                        Text("Qty +", color = BossGold, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = BossCarbonPanel2,
+                        border = BorderStroke(1.dp, BossCarbonBorder),
+                        modifier = Modifier.clickable {
+                            val newW = (item.width - 1.0).coerceAtLeast(6.0)
+                            widthText = BossCalculationEngine.formatDimValueOnly(newW, unit)
+                            onUpdate(item.copy(width = newW))
+                        }
+                    ) {
+                        Text("W -1\"", color = BossText, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = BossCarbonPanel2,
+                        border = BorderStroke(1.dp, BossCarbonBorder),
+                        modifier = Modifier.clickable {
+                            val newW = item.width + 1.0
+                            widthText = BossCalculationEngine.formatDimValueOnly(newW, unit)
+                            onUpdate(item.copy(width = newW))
+                        }
+                    ) {
+                        Text("W +1\"", color = BossText, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = BossCarbonPanel2,
+                        border = BorderStroke(1.dp, BossCarbonBorder),
+                        modifier = Modifier.clickable {
+                            val newH = (item.height - 1.0).coerceAtLeast(6.0)
+                            heightText = BossCalculationEngine.formatDimValueOnly(newH, unit)
+                            onUpdate(item.copy(height = newH))
+                        }
+                    ) {
+                        Text("H -1\"", color = BossText, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = BossCarbonPanel2,
+                        border = BorderStroke(1.dp, BossCarbonBorder),
+                        modifier = Modifier.clickable {
+                            val newH = item.height + 1.0
+                            heightText = BossCalculationEngine.formatDimValueOnly(newH, unit)
+                            onUpdate(item.copy(height = newH))
+                        }
+                    ) {
+                        Text("H +1\"", color = BossText, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
+                    }
+                }
             }
 
             Row(

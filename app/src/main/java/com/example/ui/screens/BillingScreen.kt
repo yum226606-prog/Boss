@@ -127,13 +127,9 @@ fun BillingScreen(
     val fixCount = state.fixframes.sumOf { it.qty }
     val sdCount = state.slidingDoors.sumOf { it.qty }
     val totalFrameItems = winCount + doorCount + fixCount + sdCount
-    val defaultHwRatePerItem = state.slidingDoorHardwareRate.takeIf { it > 0 } ?: 3000.0
 
     val autoHardwareCost = if (state.remoteLayoutConfig.showHardwareRow && state.autoIncludeHardware) {
-        (winCount * state.windowHardwareRate) +
-            (doorCount * state.doorHardwareRate) +
-            (fixCount * state.fixHardwareRate) +
-            (sdCount * state.slidingDoorHardwareRate)
+        totalFrameItems * state.hardwareRatePerUnit
     } else 0.0
 
     val effectiveLabourCost = if (state.remoteLayoutConfig.showLabourRow) state.labourCost else 0.0
@@ -1082,7 +1078,7 @@ fun BillingScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "Hardware ($totalFrameItems Frames)",
+                                    text = "Hardware ($totalFrameItems Frames × Rs ${state.hardwareRatePerUnit.toInt()})",
                                     color = secondaryInk,
                                     fontSize = 11.5.sp,
                                     fontWeight = FontWeight.SemiBold

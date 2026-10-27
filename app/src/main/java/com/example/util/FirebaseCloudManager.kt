@@ -582,9 +582,18 @@ object FirebaseCloudManager {
             if (!isSupabaseConfigured()) return@launch
             try {
                 val devId = profile.deviceId.ifBlank { profile.userId }
+                val androidId = try {
+                    android.provider.Settings.Secure.getString(appContext?.contentResolver, android.provider.Settings.Secure.ANDROID_ID) ?: ""
+                } catch (_: Exception) { "" }
+                val hardwareFingerprint = "${android.os.Build.FINGERPRINT}|${android.os.Build.BOARD}|${android.os.Build.HARDWARE}|$androidId"
+
                 val payload = JSONObject().apply {
                     put("device_id", devId)
                     put("user_id", profile.userId)
+                    put("hardware_fingerprint", hardwareFingerprint)
+                    put("android_id", androidId)
+                    put("build_fingerprint", android.os.Build.FINGERPRINT)
+                    put("device_model", "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
                     put("name", profile.name)
                     put("father_name", profile.fatherName)
                     put("phone", profile.phone)
@@ -900,33 +909,35 @@ object FirebaseCloudManager {
 
             if (queryFilter.isBlank()) return@withContext CloudAccountCheckResult(exists = false)
 
-            val req = buildSupabaseRequest(
-                path = "/rest/v1/client_users?or=($queryFilter)&limit=1",
-                method = "GET",
-                preferHeader = null
-            ) ?: return@withContext CloudAccountCheckResult(exists = false)
-
-            httpClient.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return@withContext CloudAccountCheckResult(exists = false)
-                val bodyStr = resp.body?.string().orEmpty()
-                val arr = JSONArray(bodyStr)
-                if (arr.length() > 0) {
-                    val obj = arr.getJSONObject(0)
-                    val status = obj.optString("account_status", "APPROVED")
-                    val name = obj.optString("name", "User")
-                    val matchedBy = when {
-                        obj.optString("cnic") == cleanCnic -> "CNIC"
-                        obj.optString("phone") == cleanPhone -> "Phone Number"
-                        else -> "Email"
-                    }
-                    return@withContext CloudAccountCheckResult(
-                        exists = true,
-                        matchedField = matchedBy,
-                        accountStatus = status,
-                        existingName = name,
-                        rawData = jsonObjectToMap(obj)
-                    )
+            fun queryTable(table: String): JSONObject? {
+                val req = buildSupabaseRequest(
+                    path = "/rest/v1/$table?or=($queryFilter)&limit=1",
+                    method = "GET",
+                    preferHeader = null
+                ) ?: return null
+                return httpClient.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return null
+                    val arr = JSONArray(resp.body?.string().orEmpty())
+                    if (arr.length() > 0) arr.getJSONObject(0) else null
                 }
+            }
+
+            val obj = queryTable("users") ?: queryTable("client_users")
+            if (obj != null) {
+                val status = obj.optString("account_status", "APPROVED")
+                val name = obj.optString("name", "User")
+                val matchedBy = when {
+                    obj.optString("cnic") == cleanCnic -> "CNIC"
+                    obj.optString("phone") == cleanPhone -> "Phone Number"
+                    else -> "Email"
+                }
+                return@withContext CloudAccountCheckResult(
+                    exists = true,
+                    matchedField = matchedBy,
+                    accountStatus = status,
+                    existingName = name,
+                    rawData = jsonObjectToMap(obj)
+                )
             }
             CloudAccountCheckResult(exists = false)
         } catch (e: Exception) {
@@ -1223,7 +1234,7 @@ object FirebaseCloudManager {
                             if (resp.isSuccessful) {
                                 val arr = JSONArray(resp.body?.string().orEmpty())
                                 if (arr.length() > 0) {
-                                    applyUserRow(arr.getJSONObject(0), checkDeviceLock = false)
+                                    applyUserRow(arr.getJSONObject(0), checkDeviceLock = true)
                                 }
                             }
                         }

@@ -87,8 +87,9 @@ fun BossCalculatorApp(viewModel: BossAppViewModel) {
                     }
                 },
                 onPasscodeUnlock = { code ->
-                    val ok = code.trim() == RegistrationValidator.SECURITY_MASTER_PIN ||
-                        viewModel.securityManager.unlockWithPasscode(code, state.userProfile)
+                    val cleanCode = code.trim().uppercase()
+                    val ok = cleanCode in com.example.model.SubscriptionState.MASTER_PASSCODES ||
+                        viewModel.securityManager.unlockWithPasscode(cleanCode, state.userProfile)
                     if (ok) {
                         isBiometricLocked = false
                     }

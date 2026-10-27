@@ -430,12 +430,23 @@ data class QuotationResult(
     val markupPct: Double,
     val totalUnits: Int,
     val hardwareTotal: Double,
+    val hardwareRate: Double = 0.0,
     val glassTotal: Double,
     val glassLines: List<GlassCostLine>,
     val transportRent: Double,
     val labourCost: Double,
     val grandTotal: Double
 )
+
+data class ScannedRateRow(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val sectionTitle: String,
+    val sectionCode: String,
+    val gauge: String,
+    val color: String,
+    var rate: Double
+)
+
 
 data class SavedQuotation(
     val id: Long = System.currentTimeMillis(),

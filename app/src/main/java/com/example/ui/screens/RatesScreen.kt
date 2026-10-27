@@ -38,6 +38,7 @@ import com.example.model.BossCalculationEngine
 import com.example.model.BossDefaultRates
 import com.example.ui.BossAppState
 import com.example.ui.BossAppViewModel
+import com.example.ui.components.MasterAiRateScannerDialog
 import com.example.ui.theme.*
 import com.example.util.RateListDetector
 import kotlinx.coroutines.launch
@@ -54,6 +55,7 @@ fun RatesScreen(
     var rateViewMode by remember { mutableStateOf(0) } // 0 = 3-Column Grid Cards, 1 = 3-Column Table (Section | Bar Rate | Ft Rate)
     var searchSection by remember { mutableStateOf("") }
     var isScanningRateList by remember { mutableStateOf(false) }
+    var showMasterAiScanner by remember { mutableStateOf(false) }
     var showAddSectionDialog by remember { mutableStateOf(false) }
     var showAddGlassColorDialog by remember { mutableStateOf(false) }
     var preselectedGlassGaugeForAdd by remember { mutableStateOf("5") }
@@ -242,36 +244,58 @@ fun RatesScreen(
                         }
                     }
 
+                    // Master Admin Industrial AI Rate Scanner Button
+                    Button(
+                        onClick = { showMasterAiScanner = true },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = BossGold,
+                            contentColor = Color(0xFF161208)
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(42.dp)
+                    ) {
+                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(17.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "⚡ Industrial AI Rate Scanner (3, 4+ Photos • 5-Col Table)",
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Button(
+                        OutlinedButton(
                             onClick = {
                                 ratePhotoPicker.launch(
                                     PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                                 )
                             },
                             enabled = !isScanningRateList,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = BossGold,
-                                contentColor = Color(0xFF161208)
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = BossCarbonPanel2,
+                                contentColor = BossGoldLight
                             ),
+                            border = BorderStroke(1.dp, BossGold),
                             shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1f).height(38.dp)
+                            modifier = Modifier.weight(1f).height(36.dp)
                         ) {
                             if (isScanningRateList) {
                                 CircularProgressIndicator(
-                                    modifier = Modifier.size(15.dp),
+                                    modifier = Modifier.size(14.dp),
                                     strokeWidth = 2.dp,
-                                    color = Color(0xFF161208)
+                                    color = BossGold
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Scanning...", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                Text("Scanning...", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             } else {
-                                Icon(Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(15.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Scan Photo", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                Icon(Icons.Default.PhotoCamera, contentDescription = null, tint = BossGoldLight, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Quick 1-Photo", color = BossGoldLight, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
 
@@ -282,13 +306,13 @@ fun RatesScreen(
                                 containerColor = BossCarbonPanel2,
                                 contentColor = BossGoldLight
                             ),
-                            border = BorderStroke(1.dp, BossGold),
+                            border = BorderStroke(1.dp, BossCarbonBorder),
                             shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1f).height(38.dp)
+                            modifier = Modifier.weight(1f).height(36.dp)
                         ) {
-                            Icon(Icons.Default.Description, contentDescription = null, tint = BossGoldLight, modifier = Modifier.size(15.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Import File", color = BossGoldLight, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                            Icon(Icons.Default.Description, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Import File", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
 
                         Button(
@@ -301,12 +325,12 @@ fun RatesScreen(
                                 contentColor = Color(0xFF04130D)
                             ),
                             shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                            modifier = Modifier.height(38.dp)
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.height(36.dp)
                         ) {
-                            Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Save Default", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
+                            Text("Save Default", fontSize = 10.5.sp, fontWeight = FontWeight.ExtraBold)
                         }
                     }
 
@@ -1888,4 +1912,13 @@ fun RatesScreen(
             }
         )
     }
+
+    if (showMasterAiScanner) {
+        MasterAiRateScannerDialog(
+            viewModel = viewModel,
+            state = state,
+            onDismiss = { showMasterAiScanner = false }
+        )
+    }
 }
+

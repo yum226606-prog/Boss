@@ -14,6 +14,7 @@ import android.net.Uri
 import android.util.Base64
 import com.example.BuildConfig
 import com.example.model.BossDefaultRates
+import com.example.model.ScannedRateRow
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.Text
 import com.google.mlkit.vision.text.TextRecognition
@@ -789,4 +790,107 @@ Output the result strictly as a clean JSON array matching this schema:
         val safeCode = clean.replace(Regex("""[^A-Z0-9*xX/_-]"""), "").trim()
         return if (safeCode.isNotBlank()) safeCode else condensed.ifBlank { raw.trim().uppercase() }
     }
+
+    fun convertDetectedItemsToScannedRows(items: List<DetectedRateItem>): List<ScannedRateRow> {
+        val result = mutableListOf<ScannedRateRow>()
+        items.forEach { item ->
+            val cat = item.category.ifBlank { "ALUMINIUM SECTIONS" }
+            val sec = item.section
+            val g = item.gauge.ifBlank { "1.2" }
+            item.rates.forEach { (col, rate) ->
+                if (rate > 0.0) {
+                    result.add(
+                        ScannedRateRow(
+                            sectionTitle = cat,
+                            sectionCode = sec,
+                            gauge = g,
+                            color = col,
+                            rate = rate
+                        )
+                    )
+                }
+            }
+        }
+        return result
+    }
+
+    fun parseRawTextToScannedRows(rawText: String): List<ScannedRateRow> {
+        if (rawText.isBlank()) return emptyList()
+        val result = mutableListOf<ScannedRateRow>()
+        val lines = rawText.lines()
+
+        // Check if user pasted direct 5-column lines: [Title] | [Code] | [Gauge] | [Color] | [Rate]
+        var parsedAsFiveCol = false
+        for (rawLine in lines) {
+            val line = rawLine.trim()
+            if (line.isBlank() || line.startsWith("#")) continue
+            if (line.contains("|")) {
+                val parts = line.split("|").map { it.trim() }
+                if (parts.size >= 5) {
+                    val rate = parts[4].replace("Rs", "", ignoreCase = true).replace(",", "").trim().toDoubleOrNull()
+                    if (rate != null && rate > 0.0) {
+                        result.add(
+                            ScannedRateRow(
+                                sectionTitle = parts[0].ifBlank { "ALUMINIUM SECTIONS" },
+                                sectionCode = normalizeSectionCode(parts[1]),
+                                gauge = normalizeGauge(parts[2]),
+                                color = mapColorHeader(parts[3]),
+                                rate = rate
+                            )
+                        )
+                        parsedAsFiveCol = true
+                    }
+                }
+            }
+        }
+
+        if (parsedAsFiveCol && result.isNotEmpty()) {
+            return result
+        }
+
+        // Otherwise parse using regular regex/NLP line parser
+        val items = parseFromRawTextLines(rawText)
+        return convertDetectedItemsToScannedRows(items)
+    }
+
+    fun formatScannedRowsToFiveColumnText(rows: List<ScannedRateRow>): String {
+        return rows.joinToString("\n") { row ->
+            "${row.sectionTitle} | ${row.sectionCode} | ${row.gauge} | ${row.color} | ${row.rate.toLong()}"
+        }
+    }
+
+    suspend fun detectScannedRowsFromMultipleUris(
+        context: Context,
+        uris: List<Uri>,
+        rawTextInput: String = ""
+    ): List<ScannedRateRow> = withContext(Dispatchers.IO) {
+        val allRows = mutableListOf<ScannedRateRow>()
+
+        // 1. Process all selected photos/PDFs
+        for (uri in uris) {
+            try {
+                val res = detectRatesFromFile(context, uri)
+                if (res.items.isNotEmpty()) {
+                    allRows.addAll(convertDetectedItemsToScannedRows(res.items))
+                }
+            } catch (_: Throwable) {
+                // Ignore individual file parse errors and continue
+            }
+        }
+
+        // 2. Process pasted raw text / sample sheet
+        if (rawTextInput.isNotBlank()) {
+            allRows.addAll(parseRawTextToScannedRows(rawTextInput))
+        }
+
+        // 3. Deduplicate rows: unique by (gauge, color, sectionCode)
+        val deduplicated = mutableMapOf<String, ScannedRateRow>()
+        allRows.forEach { r ->
+            val key = "${normalizeGauge(r.gauge)}|${mapColorHeader(r.color)}|${normalizeSectionCode(r.sectionCode)}"
+            deduplicated[key] = r
+        }
+
+        return@withContext deduplicated.values.toList()
+    }
 }
+

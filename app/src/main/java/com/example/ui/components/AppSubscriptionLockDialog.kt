@@ -832,39 +832,70 @@ fun AppSubscriptionLockDialog(
                                                 extraNote = "Package: ${selectedTier.title} (Rs $effectiveAmount) | Method: ${selectedPaymentMethod.label} | Sender: $cleanSender | TID: $cleanTid"
                                             )
                                         }
-                                        securityManager.activateDirectPackagePurchase(
+                                        securityManager.submitPendingSubscriptionPayment(
                                             profile = userProfile,
                                             tier = selectedTier,
                                             paymentMethod = selectedPaymentMethod,
                                             senderPhoneOrAccount = cleanSender,
                                             transactionReferenceId = cleanTid,
-                                            amountPaidPkr = effectiveAmount
+                                            amountPaidPkr = effectiveAmount,
+                                            receiptPath = paymentReceiptPath
                                         )
-                                        successMessage = "${selectedTier.title} Auto-Activated on your account & synced to Master Server!"
+                                        successMessage = "Payment details submitted to Admin (Syed Saboor Nawab). Your app will unlock automatically once approved by Admin."
                                         Toast.makeText(
                                             context,
-                                            "${selectedTier.title} Auto-Activated Successfully!",
+                                            "Payment details submitted to Admin. Awaiting verification.",
                                             Toast.LENGTH_LONG
                                         ).show()
-                                        onUnlocked()
                                     }
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = BossGreen,
-                                contentColor = Color(0xFF042F2E)
+                                containerColor = BossGold,
+                                contentColor = Color(0xFF161208)
                             ),
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(48.dp)
                         ) {
-                            Icon(Icons.Default.Verified, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.Payments, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Verify Payment & Auto-Activate ${selectedTier.title}",
+                                text = "Submit Payment to Admin (Syed Saboor Nawab)",
                                 fontWeight = FontWeight.Black,
-                                fontSize = 13.sp
+                                fontSize = 12.5.sp
+                            )
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                Toast.makeText(context, "Checking approval status on Master Server...", Toast.LENGTH_SHORT).show()
+                                FirebaseCloudManager.verifyUserSecurityOnServer(
+                                    context = context,
+                                    profile = userProfile
+                                ) { _, _, isBlocked, _, isActivated, isLifetime, _, _ ->
+                                    if (!isBlocked && (isActivated == true || isLifetime)) {
+                                        Toast.makeText(context, "Payment Approved by Admin! Unlocking...", Toast.LENGTH_LONG).show()
+                                        onUnlocked()
+                                    } else {
+                                        Toast.makeText(context, "Payment is still pending Admin approval.", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            },
+                            border = BorderStroke(1.dp, BossGold.copy(alpha = 0.5f)),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(42.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, tint = BossGold, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Check Approval Status with Server",
+                                color = BossGold,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.5.sp
                             )
                         }
                     }

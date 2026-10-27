@@ -801,7 +801,7 @@ class UserSecurityManager(private val context: Context) {
             return false to "Please enter a valid Transaction ID (minimum 5 characters)."
         }
         val profile = loadUserProfile()
-        activateDirectPackagePurchase(
+        submitPendingSubscriptionPayment(
             profile = profile,
             tier = pkg,
             paymentMethod = paymentMethod,
@@ -809,19 +809,19 @@ class UserSecurityManager(private val context: Context) {
             transactionReferenceId = cleanTid,
             amountPaidPkr = pkg.pricePkr
         )
-        return true to "${pkg.title} Auto-Activated on your account & synced to Master Server!"
+        return true to "Payment details submitted to Admin (Syed Saboor Nawab). Your app will unlock automatically once approved by Admin."
     }
 
-    fun activateDirectPackagePurchase(
+    fun submitPendingSubscriptionPayment(
         profile: UserProfile,
         tier: SubscriptionTier,
         paymentMethod: DirectPaymentMethod,
         senderPhoneOrAccount: String,
         transactionReferenceId: String,
-        amountPaidPkr: Int = tier.pricePkr
+        amountPaidPkr: Int = tier.pricePkr,
+        receiptPath: String? = null
     ): SubscriptionState {
         val now = System.currentTimeMillis()
-        val endMs = now + (tier.durationDays * 24L * 60L * 60L * 1000L)
         val deviceId = getDeviceHardwareId()
         val accounts = getMerchantPaymentAccounts()
         val receiverInfo = if (paymentMethod == DirectPaymentMethod.EASYPAISA) {
@@ -831,22 +831,16 @@ class UserSecurityManager(private val context: Context) {
         }
 
         val cleanTid = transactionReferenceId.trim().uppercase()
-        val autoLicenseKey = "DIRECT-${paymentMethod.code.take(4)}-${tier.code}-$cleanTid"
 
+        // Securely save pending submission without unlocking client locally
         prefs.edit()
-            .putBoolean(KEY_IS_ACTIVATED, true)
-            .putLong(KEY_ACTIVATED_UNTIL, endMs)
             .putString(KEY_LAST_TID, cleanTid)
-            .putBoolean(KEY_TAMPER_FLAG, false)
-            .remove(KEY_LOCK_REASON)
-            .putBoolean("sub_is_activated", true)
-            .putString("sub_license_key", autoLicenseKey)
-            .putString("sub_activated_tier", tier.code)
-            .putLong("sub_end_time", endMs)
-            .putLong("sub_last_known_time", now)
-            .putBoolean("sub_clock_tampered", false)
-            .putString("sub_bound_device_id", deviceId)
-            .putBoolean("sub_device_mismatch", false)
+            .putString(KEY_PAYMENT_PROOF, receiptPath)
+            .putString("sub_pending_tid", cleanTid)
+            .putString("sub_pending_tier", tier.code)
+            .putLong("sub_pending_time", now)
+            .putString("client_verification_status", "PENDING_VERIFICATION")
+            .putString(KEY_LOCK_REASON, "Payment TID ($cleanTid) submitted to Admin. Verification pending.")
             .apply()
 
         val paymentRecord = SubscriptionPaymentRecord(
@@ -862,21 +856,39 @@ class UserSecurityManager(private val context: Context) {
             senderAccountOrPhone = senderPhoneOrAccount.trim(),
             transactionReferenceId = cleanTid,
             receiverAccountDetails = receiverInfo,
-            status = "AUTO_ACTIVATED",
+            status = "PENDING_ADMIN_APPROVAL",
             timestampMs = now
         )
         savePaymentRecordLocal(paymentRecord)
 
         recordTelemetryEvent(
             profile = profile,
-            eventName = "DIRECT_PACKAGE_AUTO_ACTIVATED",
-            eventDetails = "Package: ${tier.title} (Rs $amountPaidPkr) via ${paymentMethod.label} | Sender: $senderPhoneOrAccount | TID: $cleanTid | Auto-Activated until ${SimpleDateFormat("dd MMM yyyy", Locale.US).format(Date(endMs))}"
+            eventName = "DIRECT_PACKAGE_PAYMENT_SUBMITTED",
+            eventDetails = "Package: ${tier.title} (Rs $amountPaidPkr) via ${paymentMethod.label} | Sender: $senderPhoneOrAccount | TID: $cleanTid | Status: PENDING_ADMIN_APPROVAL"
         )
 
         val updatedState = getSubscriptionState()
         FirebaseCloudManager.syncDirectSubscriptionPaymentToCloud(context, profile, updatedState, paymentRecord)
-        FirebaseCloudManager.syncSubscriptionToCloud(context, profile, updatedState)
         return updatedState
+    }
+
+    fun activateDirectPackagePurchase(
+        profile: UserProfile,
+        tier: SubscriptionTier,
+        paymentMethod: DirectPaymentMethod,
+        senderPhoneOrAccount: String,
+        transactionReferenceId: String,
+        amountPaidPkr: Int = tier.pricePkr
+    ): SubscriptionState {
+        // Redirect to submitPendingSubscriptionPayment to ensure strict admin approval
+        return submitPendingSubscriptionPayment(
+            profile = profile,
+            tier = tier,
+            paymentMethod = paymentMethod,
+            senderPhoneOrAccount = senderPhoneOrAccount,
+            transactionReferenceId = transactionReferenceId,
+            amountPaidPkr = amountPaidPkr
+        )
     }
 
     private fun savePaymentRecordLocal(rec: SubscriptionPaymentRecord) {

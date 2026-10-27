@@ -376,7 +376,8 @@ object QuotationPdfGenerator {
         textPaint.color = Color.parseColor("#1F2937")
         var summaryRowOffset = 18f
         if (state.remoteLayoutConfig.showHardwareRow) {
-            canvas.drawText("Hardware & Accessories:", 48f, curY + summaryRowOffset, textPaint)
+            val hwLabel = if (quote.totalUnits > 0) "Hardware (${quote.totalUnits} Units × Rs ${state.hardwareRatePerUnit.toInt()}):" else "Hardware & Accessories:"
+            canvas.drawText(hwLabel, 48f, curY + summaryRowOffset, textPaint)
             canvas.drawText("Rs. ${quote.hardwareTotal.toInt()}", 205f, curY + summaryRowOffset, boldPaint)
             summaryRowOffset += 17f
         }

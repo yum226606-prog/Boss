@@ -78,10 +78,7 @@ fun ProfileSettingsScreen(
 
     // 2. Hardware, Markup & Quotation Defaults fields (Labour & Transport instead of Wastage & GST)
     var autoIncludeHw by remember(state.autoIncludeHardware) { mutableStateOf(state.autoIncludeHardware) }
-    var winHwText by remember(state.windowHardwareRate) { mutableStateOf(state.windowHardwareRate.toLong().toString()) }
-    var doorHwText by remember(state.doorHardwareRate) { mutableStateOf(state.doorHardwareRate.toLong().toString()) }
-    var fixHwText by remember(state.fixHardwareRate) { mutableStateOf(state.fixHardwareRate.toLong().toString()) }
-    var sdHwText by remember(state.slidingDoorHardwareRate) { mutableStateOf(state.slidingDoorHardwareRate.toLong().toString()) }
+    var hwRateText by remember(state.hardwareRatePerUnit) { mutableStateOf(state.hardwareRatePerUnit.toLong().toString()) }
     var profitText by remember(state.profitPercent) { mutableStateOf(state.profitPercent.toString()) }
     var labourText by remember(state.labourCost) { mutableStateOf(state.labourCost.toLong().toString()) }
     var transportText by remember(state.transportRent) { mutableStateOf(state.transportRent.toLong().toString()) }
@@ -717,49 +714,21 @@ fun ProfileSettingsScreen(
                                         }
                                     }
 
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        OutlinedTextField(
-                                            value = winHwText,
-                                            onValueChange = { winHwText = it },
-                                            label = { Text("Window Hardware (Rs)", fontSize = 10.sp) },
-                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                            singleLine = true,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        OutlinedTextField(
-                                            value = doorHwText,
-                                            onValueChange = { doorHwText = it },
-                                            label = { Text("Door Hardware (Rs)", fontSize = 10.sp) },
-                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                            singleLine = true,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                    }
-
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        OutlinedTextField(
-                                            value = fixHwText,
-                                            onValueChange = { fixHwText = it },
-                                            label = { Text("Fix Frame Hardware (Rs)", fontSize = 10.sp) },
-                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                            singleLine = true,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        OutlinedTextField(
-                                            value = sdHwText,
-                                            onValueChange = { sdHwText = it },
-                                            label = { Text("Sliding Door HW (Rs)", fontSize = 10.sp) },
-                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                            singleLine = true,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                    }
+                                    OutlinedTextField(
+                                        value = hwRateText,
+                                        onValueChange = { hwRateText = it },
+                                        label = { Text("Hardware / Unit (Rs)", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                                        placeholder = { Text("e.g. 450") },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    Text(
+                                        text = "Unified Hardware Box (Master Layout): Auto-calculated in Quotation as (Total Window + Door Units × Hardware / Unit)",
+                                        color = BossGoldLight,
+                                        fontSize = 10.sp,
+                                        modifier = Modifier.padding(horizontal = 4.dp)
+                                    )
 
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
@@ -802,12 +771,10 @@ fun ProfileSettingsScreen(
 
                                     Button(
                                         onClick = {
+                                            val hwVal = hwRateText.toDoubleOrNull() ?: 450.0
                                             viewModel.saveHardwareAndQuotationDefaults(
                                                 autoInclude = autoIncludeHw,
-                                                winHw = winHwText.toDoubleOrNull() ?: 1500.0,
-                                                doorHw = doorHwText.toDoubleOrNull() ?: 2500.0,
-                                                fixHw = fixHwText.toDoubleOrNull() ?: 800.0,
-                                                sdHw = sdHwText.toDoubleOrNull() ?: 3000.0,
+                                                hwRate = hwVal,
                                                 profitPct = profitText.toDoubleOrNull() ?: 0.0,
                                                 labour = labourText.toDoubleOrNull() ?: 0.0,
                                                 transport = transportText.toDoubleOrNull() ?: 0.0,

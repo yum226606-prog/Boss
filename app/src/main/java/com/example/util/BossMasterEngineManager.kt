@@ -487,15 +487,23 @@ class BossMasterEngineManager(private val context: Context) {
             val layoutObj = layoutV1Obj
                 ?: root.optJSONObject("themeConfig")
                 ?: root.optJSONObject("theme_config")
-            val layoutPreset = layoutObj?.optString("preset", "")?.ifBlank { null }
-                ?: layoutObj?.optString("themePreset", "")?.ifBlank { null }
-                ?: root.optString("themePreset", "").ifBlank { null }
-            val layoutTabPosition = layoutObj?.optString("tabPosition", "")?.ifBlank { null }
-                ?: root.optString("tabPosition", "").ifBlank { null }
-            val layoutButtonStyle = layoutObj?.optString("buttonStyle", "")?.ifBlank { null }
-                ?: root.optString("buttonStyle", "").ifBlank { null }
-            val layoutFontWeightMode = layoutObj?.optString("fontWeightMode", "")?.ifBlank { null }
-                ?: root.optString("fontWeightMode", "").ifBlank { null }
+                ?: root.optJSONObject("layout_config")
+                ?: root.optJSONObject("layoutConfig")
+
+            fun optThemeStr(vararg keys: String): String? {
+                for (src in listOfNotNull(layoutObj, layoutV1Obj, root.optJSONObject("themeConfig"), root.optJSONObject("theme_config"), root)) {
+                    for (k in keys) {
+                        val v = src.optString(k, "").trim()
+                        if (v.isNotEmpty()) return v
+                    }
+                }
+                return null
+            }
+
+            val layoutPreset = optThemeStr("preset", "themePreset", "theme_preset", "layoutPreset", "layout_preset")
+            val layoutTabPosition = optThemeStr("tabPosition", "tab_position", "layoutTabPosition", "layout_tab_position")
+            val layoutButtonStyle = optThemeStr("buttonStyle", "button_style", "layoutButtonStyle", "layout_button_style")
+            val layoutFontWeightMode = optThemeStr("fontWeightMode", "font_weight_mode", "layoutFontWeightMode", "layout_font_weight_mode")
 
             // Parse RemoteLayoutConfig from layout_config_v1 / layoutObj / root
             val enabledTabsSet = mutableSetOf<String>()
